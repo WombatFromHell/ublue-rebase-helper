@@ -59,7 +59,8 @@ Formatting and linting should be run before finishing any code changes.
 - Verify type correctness with `pyright .` before finalizing changes
 - Add appropriate unit tests for new functionality
 - Ensure all existing tests continue to pass
-- When implementing new features or making significant changes, always plan out the next steps by prompting the user for approval before proceeding
+- When implementing new features or making significant changes, a planning step must be presented to and approved by the user before any code changes are applied to the codebase
+- No destructive changes can be applied to the project without explicit user approval first
 - When design changes are made, update the DESIGN.md document to reflect current implementation decisions
 
 ## Testing Standards
@@ -71,4 +72,6 @@ When writing tests for this project, AI agents must:
 - Keep unit tests focused on individual functions with minimal mocking
 - Write integration tests that validate how components work together
 - Create end-to-end tests that simulate complete user workflows
+- Favor pytest's parametrization (`@pytest.mark.parametrize`) for tests that cover similar functionality with different input values, rather than splitting them into multiple discrete tests unless their code concerns are different
+- When test functions are similarly named yet test different code concerns, change each test function name to concisely reflect what the test's specific code concern is to prevent tests from shadowing each other
 

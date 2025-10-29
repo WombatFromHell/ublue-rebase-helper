@@ -4,6 +4,15 @@
 
 The ublue-rebase-helper (urh.py) is a wrapper utility that provides a simplified interface for rpm-ostree and ostree commands. It leverages the gum utility to provide interactive menus and user-friendly prompts when needed.
 
+## Planning and Change Management
+
+All modifications to this project, whether they involve code changes, feature additions, or refactoring, must follow a structured planning process:
+
+- Any significant changes to the codebase must be planned with clear implementation steps before execution
+- All plans must be presented to and approved by the user before implementation begins
+- No destructive changes may be applied without explicit user consent
+- Design documents (including this one) must be updated when implementation decisions change
+
 ## Purpose
 
 This utility is designed to:
@@ -20,10 +29,23 @@ This utility is designed to:
 - **Wraps**: `sudo rpm-ostree rebase <url>`
 - **Function**: Rebase the system to a specified container image URL
 - **Requires sudo**: Yes
+- **Interactive submenu**: When no `<url>` is specified, provides a submenu of common container URLs with number prefixes for direct selection:
+  - `1: ghcr.io/ublue-os/bazzite:stable`
+  - `2: ghcr.io/ublue-os/bazzite:testing`
+  - `3: ghcr.io/ublue-os/bazzite:unstable`
+  - `*4: ghcr.io/wombatfromhell/bazzite-nix:testing` (default option marked with *)
+  - `5: ghcr.io/wombatfromhell/bazzite-nix:stable`
+  - `6: ghcr.io/astrovm/amyos:latest`
+- **Usage**: Users can navigate with arrow keys or select directly by number; press ESC to cancel
 
 #### `check`
 - **Wraps**: `sudo rpm-ostree upgrade --check`
 - **Function**: Check for available updates without applying them
+- **Requires sudo**: Yes
+
+#### `upgrade`
+- **Wraps**: `sudo rpm-ostree upgrade`
+- **Function**: Upgrade the system to the latest available version
 - **Requires sudo**: Yes
 
 #### `ls`
@@ -56,6 +78,10 @@ This utility is designed to:
 ### Menu System
 
 When no command is provided, the utility uses gum to display an interactive menu with available commands. If gum is not available, it falls back to displaying a list of available commands.
+
+### Submenu Implementation Details
+
+For commands that require submenu functionality (like `rebase`), the utility uses gum with proper subprocess configuration to ensure the interactive UI is displayed correctly. The subprocess must capture stdout to receive user selections, but stderr must not be captured to allow the gum interface to be visible in TTY contexts.
 
 ## Implementation Details
 
@@ -108,3 +134,11 @@ The project follows a comprehensive testing strategy with three distinct test ca
 - Validate the main entry point and command flow
 - Simulate real usage scenarios from user input to function calls
 - Located in `tests/test_e2e.py`
+
+### Test Parametrization
+
+When writing tests that cover similar functionality with different input values, prefer pytest's parametrization feature rather than creating multiple discrete test functions. This approach reduces code duplication and makes test maintenance easier. Only create separate tests when the code concerns are fundamentally different.
+
+### Test Function Naming
+
+When test functions are similarly named yet test different code concerns, each test function name should be changed to concisely reflect what the test's specific code concern is. This prevents tests from shadowing each other and makes it clear what each test is verifying.

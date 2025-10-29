@@ -117,3 +117,20 @@ class TestMainE2E:
 
         # Verify that rollback_command was called with empty args
         mock_rollback_command.assert_called_once_with([])
+
+    def test_main_calls_upgrade_command(self, mocker: MockerFixture):
+        """Test main calls upgrade command when upgrade is specified."""
+        # Mock sys.argv to simulate 'upgrade' command
+        mocker.patch.object(sys, "argv", ["urh.py", "upgrade"])
+
+        # Mock sys.exit so it doesn't actually exit
+        mocker.patch("urh.sys.exit")
+
+        # Mock the upgrade_command to avoid actual execution
+        mock_upgrade_command = mocker.patch("urh.upgrade_command")
+
+        # Call main function
+        main()
+
+        # Verify that upgrade_command was called with empty args
+        mock_upgrade_command.assert_called_once_with([])
