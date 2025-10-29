@@ -515,7 +515,7 @@ def rm_command(
         show_deployment_submenu_func = show_deployment_submenu
 
     def cmd_builder(num: int) -> List[str]:
-        return ["sudo", "ostree", "cleanup", "-r", str(num)]
+        return ["sudo", "rpm-ostree", "cleanup", "-r", str(num)]
 
     def error_message(value: str) -> str:
         return f"Invalid deployment number: {value}"

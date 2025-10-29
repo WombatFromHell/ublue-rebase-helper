@@ -166,7 +166,7 @@ class TestCommandsWithSubmenu:
                 rm_command,
                 "show_deployment_submenu",
                 1,
-                ["sudo", "ostree", "cleanup", "-r"],
+                ["sudo", "rpm-ostree", "cleanup", "-r"],
             ),
         ],
     )
@@ -1249,7 +1249,7 @@ class TestDeploymentCommands:
         [
             (pin_command, "pin", ["sudo", "ostree", "admin", "pin", "1"]),
             (unpin_command, "unpin", ["sudo", "ostree", "admin", "pin", "-u", "2"]),
-            (rm_command, "rm", ["sudo", "ostree", "cleanup", "-r", "3"]),
+            (rm_command, "rm", ["sudo", "rpm-ostree", "cleanup", "-r", "3"]),
         ],
     )
     def test_deployment_command_with_number(
@@ -1302,7 +1302,7 @@ class TestDeploymentCommands:
         [
             (pin_command, "pin", 2, ["sudo", "ostree", "admin", "pin", "2"]),
             (unpin_command, "unpin", 1, ["sudo", "ostree", "admin", "pin", "-u", "1"]),
-            (rm_command, "rm", 1, ["sudo", "ostree", "cleanup", "-r", "1"]),
+            (rm_command, "rm", 1, ["sudo", "rpm-ostree", "cleanup", "-r", "1"]),
         ],
     )
     def test_deployment_command_no_args_calls_submenu(
