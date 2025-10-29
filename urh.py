@@ -50,29 +50,27 @@ def get_container_options() -> List[str]:
     ]
 
 
-def show_commands_non_tty(print_func: Callable[[str], Any] = print) -> str:
+def show_commands_non_tty(print_func: Callable[[str], Any] = print) -> None:
     """Show command list when not in TTY context."""
     print_func("Not running in interactive mode. Available commands:")
     for cmd_desc in get_commands_with_descriptions():
         print_func(f"  {cmd_desc}")
     print_func("\nRun 'urh.py help' for more information.")
-    return ""
 
 
-def show_commands_gum_not_found(print_func: Callable[[str], Any] = print) -> str:
+def show_commands_gum_not_found(print_func: Callable[[str], Any] = print) -> None:
     """Show command list when gum is not found."""
     print_func("gum not found. Available commands:")
     for cmd_desc in get_commands_with_descriptions():
         print_func(f"  {cmd_desc}")
     print_func("\nRun 'urh.py help' for more information.")
-    return ""
 
 
 def show_command_menu(
     is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
     subprocess_run_func: Callable[..., Any] = subprocess.run,
     print_func: Callable[[str], Any] = print,
-) -> str | None:
+) -> Optional[str]:
     """Show a menu of available commands using gum."""
     # Use gum to show the menu and get user selection
     try:
@@ -97,45 +95,45 @@ def show_command_menu(
                 return command
             else:
                 # When gum returns non-zero exit code (no selection made),
-                # print message and return empty string to avoid duplicate help
+                # print message and return None to indicate no selection
                 if result.returncode == 1:
                     print_func("No command selected.")
-                return ""
+                return None
         else:
-            # Not running in TTY, show the command list only (don't return "help" to avoid duplicate output)
-            return show_commands_non_tty(print_func)
+            # Not running in TTY, show the command list only (don't return a command to avoid duplicate output)
+            show_commands_non_tty(print_func)
+            return None
     except FileNotFoundError:
         # Show full descriptions when gum is not found
-        return show_commands_gum_not_found(print_func)
+        show_commands_gum_not_found(print_func)
+        return None
 
 
-def show_container_options_non_tty(print_func: Callable[[str], Any] = print) -> str:
+def show_container_options_non_tty(print_func: Callable[[str], Any] = print) -> None:
     """Show container options when not in TTY context."""
     print_func("Available container URLs:")
     options = get_container_options()
     for _, option in enumerate(options, 1):
         print_func(f"{option}")
     print_func("\nRun 'urh.py rebase <url>' with a specific URL.")
-    return ""
 
 
 def show_container_options_gum_not_found(
     print_func: Callable[[str], Any] = print,
-) -> str:
+) -> None:
     """Show container options when gum is not found."""
     print_func("gum not found. Available container URLs:")
     options = get_container_options()
     for _, option in enumerate(options, 1):
         print_func(f"{option}")
     print_func("\nRun 'urh.py rebase <url>' with a specific URL.")
-    return ""
 
 
 def show_rebase_submenu(
     is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
     subprocess_run_func: Callable[..., Any] = subprocess.run,
     print_func: Callable[[str], Any] = print,
-) -> str | None:
+) -> Optional[str]:
     """Show a submenu of common container URLs using gum."""
     try:
         # Check if we're running in a TTY context before using gum
@@ -169,17 +167,22 @@ def show_rebase_submenu(
 
                     in_test_mode = "PYTEST_CURRENT_TEST" in os.environ
                     if in_test_mode:
-                        # In test mode, print message and return empty string for integration tests
+                        # In test mode, print message and return None for integration tests
                         print_func("No option selected.")
-                        return ""
+                        return None
                     else:
                         # In normal mode, raise exception to return to main menu
                         raise MenuExitException()
                 # For other errors, return None
                 return None
+        else:
+            # Not running in TTY, show the list only
+            show_container_options_non_tty(print_func)
+            return None
     except FileNotFoundError:
         # gum not found, show the list only
-        return show_container_options_gum_not_found(print_func)
+        show_container_options_gum_not_found(print_func)
+        return None
 
 
 def rebase_command(
@@ -194,8 +197,8 @@ def rebase_command(
         # No URL provided, show submenu to select from common container URLs
         selected_url = show_rebase_submenu_func()
         # If submenu raises an exception (like MenuExitException), it will propagate up
-        # If submenu returns empty value, we exit gracefully
-        if not selected_url:
+        # If submenu returns None, we exit gracefully
+        if selected_url is None:
             return  # No selection made, exit gracefully
         url = selected_url
     else:
@@ -514,7 +517,7 @@ def upgrade_command(args: List[str]):
     sys.exit(run_command(cmd))
 
 
-def help_command(args: List[str], print_func: Callable[[str], Any] = print):
+def help_command(args: List[str], print_func: Callable[[str], Any] = print) -> None:
     """Show help information."""
     print_func(
         "ublue-rebase-helper (urh.py) - Wrapper for rpm-ostree and ostree commands"

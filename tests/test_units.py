@@ -103,9 +103,9 @@ class TestRebaseCommand:
 
     def test_rebase_command_no_args_no_selection(self, mocker: MockerFixture):
         """Test rebase_command handles no selection from submenu."""
-        # Mock the show_rebase_submenu function to return empty string
+        # Mock the show_rebase_submenu function to return None (new behavior)
         mock_show_rebase_submenu = mocker.patch(
-            "urh.show_rebase_submenu", return_value=""
+            "urh.show_rebase_submenu", return_value=None
         )
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
         mock_sys_exit = mocker.patch("urh.sys.exit")
@@ -194,7 +194,7 @@ class TestCommandsWithSubmenu:
     @pytest.mark.parametrize(
         "func,submenu_func_name,no_selection_value",
         [
-            (rebase_command, "show_rebase_submenu", ""),
+            (rebase_command, "show_rebase_submenu", None),
             (pin_command, "show_deployment_submenu", None),
             (unpin_command, "show_deployment_submenu", None),
             (rm_command, "show_deployment_submenu", None),
@@ -459,7 +459,7 @@ class TestShowCommandsFunctions:
         mock_print = mocker.Mock()
         result = show_commands_non_tty(print_func=mock_print)
 
-        assert result == ""
+        assert result is None
         mock_print.assert_any_call(
             "Not running in interactive mode. Available commands:"
         )
@@ -473,7 +473,7 @@ class TestShowCommandsFunctions:
         mock_print = mocker.Mock()
         result = show_commands_gum_not_found(print_func=mock_print)
 
-        assert result == ""
+        assert result is None
         mock_print.assert_any_call("gum not found. Available commands:")
         # Should print all commands + the final message
         assert (
@@ -489,7 +489,7 @@ class TestShowContainerOptionsFunctions:
         mock_print = mocker.Mock()
         result = show_container_options_non_tty(print_func=mock_print)
 
-        assert result == ""
+        assert result is None
         mock_print.assert_any_call("Available container URLs:")
         # Should print all container options + the final message
         assert (
@@ -501,7 +501,7 @@ class TestShowContainerOptionsFunctions:
         mock_print = mocker.Mock()
         result = show_container_options_gum_not_found(print_func=mock_print)
 
-        assert result == ""
+        assert result is None
         mock_print.assert_any_call("gum not found. Available container URLs:")
         # Should print all container options + the final message
         assert (
@@ -655,8 +655,8 @@ class TestShowCommandMenu:
             print_func=mock_print,
         )
 
-        # When gum returns non-zero exit code (no selection), it should return empty string to avoid help duplication
-        assert result == ""
+        # When gum returns non-zero exit code (no selection), it should return None to avoid help duplication
+        assert result is None
         # And should print a message about no command being selected
         mock_print.assert_called_with("No command selected.")
 
@@ -668,8 +668,8 @@ class TestShowCommandMenu:
 
         result = show_command_menu(is_tty_func=mock_is_tty, print_func=mock_print)
 
-        # In non-TTY context, it should return an empty string
-        assert result == ""
+        # In non-TTY context, it should return None
+        assert result is None
         # And should print the available commands
         mock_print.assert_any_call(
             "Not running in interactive mode. Available commands:"
@@ -687,7 +687,7 @@ class TestShowCommandMenu:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         # The test should print commands when gum not available
         assert mock_print.called
         mock_print.assert_any_call("gum not found. Available commands:")
@@ -725,7 +725,7 @@ class TestShowRebaseSubmenuRefactored:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         mock_print.assert_called_with("No option selected.")
 
     def test_show_rebase_submenu_non_tty(self, mocker: MockerFixture):
@@ -734,10 +734,9 @@ class TestShowRebaseSubmenuRefactored:
         mock_print = mocker.Mock()
 
         result = show_rebase_submenu(is_tty_func=mock_is_tty, print_func=mock_print)
-        # Function may return different values in test environment
-        assert result in ["", None]
-        if result is not None:  # Only check print calls if function executed properly
-            mock_print.assert_any_call("Available container URLs:")
+        # Function should return None in non-TTY context
+        assert result is None
+        mock_print.assert_any_call("Available container URLs:")
 
     def test_show_rebase_submenu_gum_not_found(self, mocker: MockerFixture):
         """Test show_rebase_submenu when gum is not available."""
@@ -750,7 +749,7 @@ class TestShowRebaseSubmenuRefactored:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         mock_print.assert_any_call("gum not found. Available container URLs:")
 
 
@@ -1242,11 +1241,11 @@ class TestMenuExitException:
         mock_result.stdout = ""
         mock_subprocess_run.return_value = mock_result
 
-        # In test environment, the function returns empty string instead of raising exception
+        # In test environment, the function returns None instead of raising exception
         result = show_rebase_submenu(
             is_tty_func=mock_is_tty, subprocess_run_func=mock_subprocess_run
         )
-        assert result == ""
+        assert result is None
 
     def test_show_deployment_submenu_raises_menu_exit_on_esc(
         self, mocker: MockerFixture

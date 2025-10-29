@@ -100,6 +100,16 @@ When using interactive submenus, the utility supports intuitive navigation:
 
 All commands are executed using `subprocess.run()` with proper error handling. The utility returns the exit code from the underlying commands to maintain proper exit status behavior.
 
+### Type Safety Requirements
+
+The codebase follows strict typing requirements to improve maintainability and reduce bugs:
+
+- Functions that perform UI display operations should return `None` rather than empty strings
+- Functions that return data should have consistent return types (e.g., `Optional[str]`, `Optional[int]`) rather than mixing types
+- Functions should return a single valid type or `None` and never return blank strings as a form of "no value"
+- Avoid union return types like `Union[str, None]` where possible in favor of proper `Optional[T]` annotations
+- Separate business logic from UI presentation by having distinct functions for data processing and display
+
 ### Privilege Escalation
 
 Commands that modify the system state require elevated privileges using `sudo`. The utility automatically prepends `sudo` to these commands.

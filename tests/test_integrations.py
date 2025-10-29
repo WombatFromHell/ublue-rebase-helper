@@ -65,7 +65,7 @@ class TestShowCommandMenu:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         # Verify that print was called to show "No command selected."
         mock_print.assert_called_with("No command selected.")
 
@@ -81,7 +81,7 @@ class TestShowCommandMenu:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         # Check that print was called to show available commands
         assert mock_print.called
 
@@ -92,7 +92,7 @@ class TestShowCommandMenu:
         mock_print = mocker.Mock()
 
         result = show_command_menu(is_tty_func=mock_is_tty, print_func=mock_print)
-        assert result == ""
+        assert result is None
         # In non-TTY, it should show commands without gum
         mock_print.assert_any_call(
             "Not running in interactive mode. Available commands:"
@@ -155,7 +155,7 @@ class TestShowRebaseSubmenu:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         mock_print.assert_called_with("No option selected.")
 
     def test_show_rebase_submenu_gum_not_found(self, mocker: MockerFixture):
@@ -170,7 +170,7 @@ class TestShowRebaseSubmenu:
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
         )
-        assert result == ""
+        assert result is None
         # Check that print was called to show available commands
         assert mock_print.called
 
