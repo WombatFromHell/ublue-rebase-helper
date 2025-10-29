@@ -88,11 +88,13 @@ For commands that require submenu functionality (like `rebase`), the utility use
 
 ### Menu Navigation Behavior
 
-When using interactive submenus, the utility supports intuitive navigation:
+When using interactive menus, the utility supports intuitive navigation:
+- Pressing ESC in the main menu will exit the program
 - Pressing ESC in any submenu will return the user to the main menu
 - When ESC is pressed in a submenu (gum choose), a special `MenuExitException` is raised
-- This exception is caught by the main menu loop, which then redisplays the main menu
-- This provides a consistent user experience where ESC acts as a "back" function
+- When ESC is pressed in the main menu (gum choose), a special `MenuExitException` is raised
+- These exceptions are caught by the main menu loop, which then either exits the program (main menu) or redisplays the main menu (submenus)
+- This provides a consistent user experience where ESC acts as a "back" function in submenus and "exit" in the main menu
 
 ## Implementation Details
 
@@ -109,6 +111,13 @@ The codebase follows strict typing requirements to improve maintainability and r
 - Functions should return a single valid type or `None` and never return blank strings as a form of "no value"
 - Avoid union return types like `Union[str, None]` where possible in favor of proper `Optional[T]` annotations
 - Separate business logic from UI presentation by having distinct functions for data processing and display
+
+### Code Reusability
+
+To reduce code duplication and improve maintainability, the codebase uses common utility functions:
+
+- `run_gum_submenu()` - A generic function for displaying interactive menus with gum that handles both TTY and non-TTY contexts, as well as "gum not found" scenarios
+- `handle_command_with_submenu()` - A generic function for handling commands that can accept arguments or show submenus, reducing duplication in rebase, pin, unpin, and rm commands
 
 ### Privilege Escalation
 
@@ -186,6 +195,12 @@ When modifying or adding tests to this project, developers must leverage the sha
 ### Test Parametrization
 
 When writing tests that cover similar functionality with different input values, prefer pytest's parametrization feature rather than creating multiple discrete test functions. This approach reduces code duplication and makes test maintenance easier. Only create separate tests when the code concerns are fundamentally different.
+
+The test suite should leverage parametrization to consolidate similar test scenarios, such as:
+- Testing command functions with different input parameters
+- Testing error handling for various error conditions
+- Testing submenu functionality with different return values
+- Testing commands that follow similar patterns (like pin, unpin, rm which all take deployment numbers)
 
 ### Test Function Naming
 

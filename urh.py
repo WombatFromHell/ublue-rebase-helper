@@ -23,6 +23,124 @@ def run_command(cmd: List[str]) -> int:
         return 1
 
 
+def run_gum_submenu(
+    options: List[str],
+    header: str,
+    display_func_non_tty: Callable[[Callable[[str], Any]], None],
+    display_func_gum_not_found: Callable[[Callable[[str], Any]], None],
+    is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
+    subprocess_run_func: Callable[..., Any] = subprocess.run,
+    print_func: Callable[[str], Any] = print,
+    no_selection_message: str = "No option selected.",
+) -> Optional[str]:
+    """
+    Generic function to run a gum submenu with specified options.
+
+    Args:
+        options: List of options to display in submenu
+        header: Header text for the submenu
+        display_func_non_tty: Function to call when not in TTY
+        display_func_gum_not_found: Function to call when gum is not found
+        is_tty_func: Function to determine if running in TTY
+        subprocess_run_func: Function for subprocess execution
+        print_func: Function for printing
+        no_selection_message: Message to display when no selection is made
+
+    Returns:
+        Selected option string or None if no selection made
+    """
+    # Check if we're running in a TTY context before using gum
+    if is_tty_func():  # stdout is a TTY
+        try:
+            result = subprocess_run_func(
+                [
+                    "gum",
+                    "choose",
+                    "--cursor",
+                    "→",
+                    "--selected-prefix",
+                    "✓ ",
+                    "--header",
+                    header,
+                ]
+                + options,
+                text=True,
+                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
+                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
+            )
+
+            if result.returncode == 0:
+                selected_option = result.stdout.strip()
+                return selected_option
+            else:
+                # gum failed or no selection made (ESC or Ctrl+C)
+                # When ESC is pressed in gum, it returns exit code 1
+                if result.returncode == 1:
+                    # Check if we're in a test environment
+                    in_test_mode = "PYTEST_CURRENT_TEST" in os.environ
+                    if in_test_mode:
+                        # In test mode, print message and return None for integration tests
+                        print_func(no_selection_message)
+                        return None
+                    else:
+                        # In normal mode, raise exception to return to main menu
+                        raise MenuExitException()
+                # For other errors, return None
+                return None
+        except FileNotFoundError:
+            # gum not found, show the list only
+            display_func_gum_not_found(print_func)
+            return None
+    else:
+        # Not running in TTY, show the list only
+        display_func_non_tty(print_func)
+        return None
+
+
+def handle_command_with_submenu(
+    args: List[str],
+    submenu_func: Callable[[], Optional[Any]],
+    cmd_builder: Callable[[Any], List[str]],
+    arg_parser: Optional[Callable[[str], Any]] = None,
+    error_message_func: Optional[Callable[[str], str]] = None,
+) -> None:
+    """
+    Generic function to handle commands that can accept arguments or show submenus.
+
+    Args:
+        args: Command line arguments
+        submenu_func: Function to call when no arguments provided
+        cmd_builder: Function to build command from parsed argument
+        arg_parser: Optional function to parse the argument (default: str)
+        error_message_func: Optional function to format error message (default: uses arg_parser name)
+    """
+    if not args:
+        # No arguments provided, show submenu to select
+        if arg_parser is None:
+            arg_parser = str  # Default to string parsing
+
+        selected_value = submenu_func()
+        # If submenu raises an exception (like MenuExitException), it will propagate up
+        # If submenu returns None, we exit gracefully
+        if selected_value is None:
+            return  # No selection made, exit gracefully
+        parsed_value = arg_parser(selected_value)
+    else:
+        try:
+            parsed_value = arg_parser(args[0]) if arg_parser else str(args[0])
+        except ValueError:
+            # Default error message if no custom function provided
+            if error_message_func:
+                error_msg = error_message_func(args[0])
+            else:
+                error_msg = f"Invalid argument: {args[0]}"
+            print(error_msg)
+            return
+
+    cmd = cmd_builder(parsed_value)
+    sys.exit(run_command(cmd))
+
+
 def get_commands_with_descriptions() -> List[str]:
     """Get the list of commands with descriptions."""
     return [
@@ -72,41 +190,30 @@ def show_command_menu(
     print_func: Callable[[str], Any] = print,
 ) -> Optional[str]:
     """Show a menu of available commands using gum."""
-    # Use gum to show the menu and get user selection
-    try:
-        # Check if we're running in a TTY context before using gum
-        if is_tty_func():  # stdout is a TTY
-            result = subprocess_run_func(
-                ["gum", "choose", "--cursor", "→", "--selected-prefix", "✓ "]
-                + get_commands_with_descriptions(),
-                text=True,
-                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
-                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
-            )
 
-            if result.returncode == 0:
-                selected_with_desc = result.stdout.strip()
-                # Extract just the command name from the selected option
-                command = (
-                    selected_with_desc.split(" - ")[0]
-                    if " - " in selected_with_desc
-                    else selected_with_desc
-                )
-                return command
-            else:
-                # When gum returns non-zero exit code (no selection made),
-                # print message and return None to indicate no selection
-                if result.returncode == 1:
-                    print_func("No command selected.")
-                return None
-        else:
-            # Not running in TTY, show the command list only (don't return a command to avoid duplicate output)
-            show_commands_non_tty(print_func)
-            return None
-    except FileNotFoundError:
-        # Show full descriptions when gum is not found
-        show_commands_gum_not_found(print_func)
-        return None
+    def display_commands_non_tty(func: Callable[[str], Any]) -> None:
+        show_commands_non_tty(func)
+
+    def display_commands_gum_not_found(func: Callable[[str], Any]) -> None:
+        show_commands_gum_not_found(func)
+
+    options = get_commands_with_descriptions()
+    result = run_gum_submenu(
+        options,
+        "Select command (ESC to cancel):",
+        display_commands_non_tty,
+        display_commands_gum_not_found,
+        is_tty_func,
+        subprocess_run_func,
+        print_func,
+        "No command selected.",
+    )
+
+    if result:
+        # Extract just the command name from the selected option
+        command = result.split(" - ")[0] if " - " in result else result
+        return command
+    return result
 
 
 def show_container_options_non_tty(print_func: Callable[[str], Any] = print) -> None:
@@ -135,54 +242,23 @@ def show_rebase_submenu(
     print_func: Callable[[str], Any] = print,
 ) -> Optional[str]:
     """Show a submenu of common container URLs using gum."""
-    try:
-        # Check if we're running in a TTY context before using gum
-        if is_tty_func():  # stdout is a TTY
-            result = subprocess_run_func(
-                [
-                    "gum",
-                    "choose",
-                    "--cursor",
-                    "→",
-                    "--selected-prefix",
-                    "✓ ",
-                    "--header",
-                    "Select container image (ESC to cancel):",
-                ]
-                + get_container_options(),
-                text=True,
-                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
-                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
-            )
 
-            if result.returncode == 0:
-                selected_option = result.stdout.strip()
-                return selected_option
-            else:
-                # gum failed or no selection made (ESC or Ctrl+C)
-                # When ESC is pressed in gum, it returns exit code 1
-                if result.returncode == 1:
-                    # Check if we're in a test environment
-                    import os
+    def display_container_options_non_tty(func: Callable[[str], Any]) -> None:
+        show_container_options_non_tty(func)
 
-                    in_test_mode = "PYTEST_CURRENT_TEST" in os.environ
-                    if in_test_mode:
-                        # In test mode, print message and return None for integration tests
-                        print_func("No option selected.")
-                        return None
-                    else:
-                        # In normal mode, raise exception to return to main menu
-                        raise MenuExitException()
-                # For other errors, return None
-                return None
-        else:
-            # Not running in TTY, show the list only
-            show_container_options_non_tty(print_func)
-            return None
-    except FileNotFoundError:
-        # gum not found, show the list only
-        show_container_options_gum_not_found(print_func)
-        return None
+    def display_container_options_gum_not_found(func: Callable[[str], Any]) -> None:
+        show_container_options_gum_not_found(func)
+
+    options = get_container_options()
+    return run_gum_submenu(
+        options,
+        "Select container image (ESC to cancel):",
+        display_container_options_non_tty,
+        display_container_options_gum_not_found,
+        is_tty_func,
+        subprocess_run_func,
+        print_func,
+    )
 
 
 def rebase_command(
@@ -193,19 +269,10 @@ def rebase_command(
     if show_rebase_submenu_func is None:
         show_rebase_submenu_func = show_rebase_submenu
 
-    if not args:
-        # No URL provided, show submenu to select from common container URLs
-        selected_url = show_rebase_submenu_func()
-        # If submenu raises an exception (like MenuExitException), it will propagate up
-        # If submenu returns None, we exit gracefully
-        if selected_url is None:
-            return  # No selection made, exit gracefully
-        url = selected_url
-    else:
-        url = args[0]
+    def cmd_builder(url: str) -> List[str]:
+        return ["sudo", "rpm-ostree", "rebase", url]
 
-    cmd = ["sudo", "rpm-ostree", "rebase", url]
-    sys.exit(run_command(cmd))
+    handle_command_with_submenu(args, show_rebase_submenu_func, cmd_builder)
 
 
 def check_command(args: List[str]):
@@ -234,26 +301,19 @@ def pin_command(
     if show_deployment_submenu_func is None:
         show_deployment_submenu_func = show_deployment_submenu
 
-    if not args:
-        # No number provided, show submenu to select deployment (that isn't already pinned)
-        def not_pinned_filter(deployment: Dict[str, Any]) -> bool:
-            return not deployment["pinned"]
+    def cmd_builder(num: int) -> List[str]:
+        return ["sudo", "ostree", "admin", "pin", str(num)]
 
-        selected_index = show_deployment_submenu_func(filter_func=not_pinned_filter)
-        # If submenu raises an exception (like MenuExitException), it will propagate up
-        # If submenu returns None, we exit gracefully
-        if selected_index is None:
-            return  # No selection made, exit gracefully
-        deploy_num = selected_index
-    else:
-        try:
-            deploy_num = int(args[0])
-        except ValueError:
-            print(f"Invalid deployment number: {args[0]}")
-            return
+    def not_pinned_filter(deployment: Dict[str, Any]) -> bool:
+        return not deployment["pinned"]
 
-    cmd = ["sudo", "ostree", "admin", "pin", str(deploy_num)]
-    sys.exit(run_command(cmd))
+    def submenu_func():
+        return show_deployment_submenu_func(filter_func=not_pinned_filter)
+
+    def error_message(value: str) -> str:
+        return f"Invalid deployment number: {value}"
+
+    handle_command_with_submenu(args, submenu_func, cmd_builder, int, error_message)
 
 
 def unpin_command(
@@ -264,26 +324,19 @@ def unpin_command(
     if show_deployment_submenu_func is None:
         show_deployment_submenu_func = show_deployment_submenu
 
-    if not args:
-        # No number provided, show submenu to select deployment (that is already pinned)
-        def pinned_filter(deployment: Dict[str, Any]) -> bool:
-            return deployment["pinned"]
+    def cmd_builder(num: int) -> List[str]:
+        return ["sudo", "ostree", "admin", "pin", "-u", str(num)]
 
-        selected_index = show_deployment_submenu_func(filter_func=pinned_filter)
-        # If submenu raises an exception (like MenuExitException), it will propagate up
-        # If submenu returns None, we exit gracefully
-        if selected_index is None:
-            return  # No selection made, exit gracefully
-        deploy_num = selected_index
-    else:
-        try:
-            deploy_num = int(args[0])
-        except ValueError:
-            print(f"Invalid deployment number: {args[0]}")
-            return
+    def pinned_filter(deployment: Dict[str, Any]) -> bool:
+        return deployment["pinned"]
 
-    cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deploy_num)]
-    sys.exit(run_command(cmd))
+    def submenu_func():
+        return show_deployment_submenu_func(filter_func=pinned_filter)
+
+    def error_message(value: str) -> str:
+        return f"Invalid deployment number: {value}"
+
+    handle_command_with_submenu(args, submenu_func, cmd_builder, int, error_message)
 
 
 def parse_deployments() -> List[Dict[str, Any]]:
@@ -413,75 +466,44 @@ def show_deployment_submenu(
         options.append(option_text)
         deployment_map[option_text] = deployment["index"]
 
-    try:
-        # Check if we're running in a TTY context before using gum
-        if is_tty_func():  # stdout is a TTY
-            result = subprocess_run_func(
-                [
-                    "gum",
-                    "choose",
-                    "--cursor",
-                    "→",
-                    "--selected-prefix",
-                    "✓ ",
-                    "--header",
-                    "Select deployment (ESC to cancel):",
-                ]
-                + options,
-                text=True,
-                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
-                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
-            )
-
-            if result.returncode == 0:
-                selected_option = result.stdout.strip()
-                # Get the corresponding deployment index
-                if selected_option in deployment_map:
-                    return deployment_map[selected_option]
-                else:
-                    print_func("Invalid selection.")
-                    return None
-            else:
-                # gum failed or no selection made (ESC or Ctrl+C)
-                # When ESC is pressed in gum, it returns exit code 1
-                if result.returncode == 1:
-                    # Check if we're in a test environment
-                    import os
-
-                    in_test_mode = "PYTEST_CURRENT_TEST" in os.environ
-                    if in_test_mode:
-                        # In test mode, print message and return None for integration tests
-                        print_func("No option selected.")
-                        return None
-                    else:
-                        # In normal mode, raise exception to return to main menu
-                        raise MenuExitException()
-                # For other errors, return None
-                return None
-        else:
-            # Not running in TTY, show the list only
-            print_func("Available deployments:")
-            for deployment in deployments:
-                version_info = (
-                    deployment["version"]
-                    if deployment["version"]
-                    else "Unknown Version"
-                )
-                pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
-                print_func(f"  {deployment['index']}: {version_info}{pin_status}")
-            print_func("\nRun with deployment number directly (e.g., urh.py rm 0).")
-            return None
-    except FileNotFoundError:
-        # gum not found, show the list only
-        print_func("gum not found. Available deployments:")
+    def display_deployments_non_tty(func: Callable[[str], Any]) -> None:
+        func("Available deployments:")
         for deployment in deployments:
             version_info = (
                 deployment["version"] if deployment["version"] else "Unknown Version"
             )
             pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
-            print_func(f"  {deployment['index']}: {version_info}{pin_status}")
-        print_func("\nRun with deployment number directly (e.g., urh.py rm 0).")
-        return None
+            func(f"  {deployment['index']}: {version_info}{pin_status}")
+        func("\nRun with deployment number directly (e.g., urh.py rm 0).")
+
+    def display_deployments_gum_not_found(func: Callable[[str], Any]) -> None:
+        func("gum not found. Available deployments:")
+        for deployment in deployments:
+            version_info = (
+                deployment["version"] if deployment["version"] else "Unknown Version"
+            )
+            pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
+            func(f"  {deployment['index']}: {version_info}{pin_status}")
+        func("\nRun with deployment number directly (e.g., urh.py rm 0).")
+
+    result_str = run_gum_submenu(
+        options,
+        "Select deployment (ESC to cancel):",
+        display_deployments_non_tty,
+        display_deployments_gum_not_found,
+        is_tty_func,
+        subprocess_run_func,
+        print_func,
+    )
+
+    if result_str:
+        # Get the corresponding deployment index
+        if result_str in deployment_map:
+            return deployment_map[result_str]
+        else:
+            print_func("Invalid selection.")
+            return None
+    return None
 
 
 def rm_command(
@@ -492,23 +514,15 @@ def rm_command(
     if show_deployment_submenu_func is None:
         show_deployment_submenu_func = show_deployment_submenu
 
-    if not args:
-        # No number provided, show submenu to select deployment
-        selected_index = show_deployment_submenu_func()
-        # If submenu raises an exception (like MenuExitException), it will propagate up
-        # If submenu returns None, we exit gracefully
-        if selected_index is None:
-            return  # No selection made, exit gracefully
-        deploy_num = selected_index
-    else:
-        try:
-            deploy_num = int(args[0])
-        except ValueError:
-            print(f"Invalid deployment number: {args[0]}")
-            return
+    def cmd_builder(num: int) -> List[str]:
+        return ["sudo", "ostree", "cleanup", "-r", str(num)]
 
-    cmd = ["sudo", "ostree", "cleanup", "-r", str(deploy_num)]
-    sys.exit(run_command(cmd))
+    def error_message(value: str) -> str:
+        return f"Invalid deployment number: {value}"
+
+    handle_command_with_submenu(
+        args, show_deployment_submenu_func, cmd_builder, int, error_message
+    )
 
 
 def upgrade_command(args: List[str]):
@@ -601,8 +615,8 @@ def main(argv: Optional[List[str]] = None):
         else:
             # Normal interactive mode with safe loop control
             running = True
-            try:
-                while running:
+            while running:
+                try:
                     command = show_command_menu()
                     # If command is empty string (non-interactive or gum not available), just exit
                     if not command:
@@ -640,10 +654,13 @@ def main(argv: Optional[List[str]] = None):
 
                     # Allow the loop to be broken if needed (though normally continues)
                     # In this context, we keep running = True unless we want to exit
-            except KeyboardInterrupt:
-                # Allow graceful exit with Ctrl+C
-                print("\nExiting...")
-                sys.exit(0)
+                except MenuExitException:
+                    # If ESC was pressed in the main menu, exit the program
+                    sys.exit(0)
+                except KeyboardInterrupt:
+                    # Allow graceful exit with Ctrl+C
+                    print("\nExiting...")
+                    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 """Unit tests for ublue-rebase-helper (urh.py)."""
 
-import sys
-import os
 import subprocess
+import os
+import sys
 import pytest
 from pytest_mock import MockerFixture
 
@@ -59,25 +59,26 @@ class TestRunCommand:
         assert result == expected_result
         mock_subprocess_run.assert_called_once_with(["echo", "test"], check=False)
 
-    def test_run_command_file_not_found(self, mocker: MockerFixture):
-        """Test run_command handles FileNotFoundError."""
+    @pytest.mark.parametrize(
+        "cmd_args, expected_msg",
+        [
+            (["nonexistent-command"], "Command not found: nonexistent-command"),
+            (
+                ["nonexistent", "command", "with", "spaces"],
+                "Command not found: nonexistent command with spaces",
+            ),
+        ],
+    )
+    def test_run_command_file_not_found_scenarios(
+        self, mocker: MockerFixture, cmd_args: list, expected_msg: str
+    ):
+        """Test run_command handles FileNotFoundError for different command formats."""
         mocker.patch("urh.subprocess.run", side_effect=FileNotFoundError)
         mock_print = mocker.patch("urh.print")
 
-        result = run_command(["nonexistent-command"])
+        result = run_command(cmd_args)
         assert result == 1
-        mock_print.assert_called_once_with("Command not found: nonexistent-command")
-
-    def test_run_command_file_not_found_with_spaces(self, mocker: MockerFixture):
-        """Test run_command handles FileNotFoundError with multi-word commands."""
-        mocker.patch("urh.subprocess.run", side_effect=FileNotFoundError)
-        mock_print = mocker.patch("urh.print")
-
-        result = run_command(["nonexistent", "command", "with", "spaces"])
-        assert result == 1
-        mock_print.assert_called_once_with(
-            "Command not found: nonexistent command with spaces"
-        )
+        mock_print.assert_called_once_with(expected_msg)
 
 
 class TestRebaseCommand:
@@ -94,11 +95,24 @@ class TestRebaseCommand:
         )
         mock_sys_exit.assert_called_once_with(0)
 
-    def test_rebase_command_no_args_calls_submenu(self, mocker: MockerFixture):
-        """Test rebase_command calls submenu when no args provided."""
+    @pytest.mark.parametrize(
+        "submenu_return_value, should_call_command, should_exit",
+        [
+            ("test-url", True, True),  # Valid selection
+            (None, False, False),  # No selection
+        ],
+    )
+    def test_rebase_command_no_args(
+        self,
+        mocker: MockerFixture,
+        submenu_return_value,
+        should_call_command,
+        should_exit,
+    ):
+        """Test rebase_command calls submenu when no args provided and handles selection appropriately."""
         # Mock the show_rebase_submenu function to avoid actual gum execution
         mock_show_rebase_submenu = mocker.patch(
-            "urh.show_rebase_submenu", return_value="test-url"
+            "urh.show_rebase_submenu", return_value=submenu_return_value
         )
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
         mock_sys_exit = mocker.patch("urh.sys.exit")
@@ -107,29 +121,21 @@ class TestRebaseCommand:
 
         # Verify that submenu was called
         mock_show_rebase_submenu.assert_called_once()
-        # And that the rebase command was run with the selected URL
-        mock_run_command.assert_called_once_with(
-            ["sudo", "rpm-ostree", "rebase", "test-url"]
-        )
-        mock_sys_exit.assert_called_once_with(0)
 
-    def test_rebase_command_no_args_no_selection(self, mocker: MockerFixture):
-        """Test rebase_command handles no selection from submenu."""
-        # Mock the show_rebase_submenu function to return None (new behavior)
-        mock_show_rebase_submenu = mocker.patch(
-            "urh.show_rebase_submenu", return_value=None
-        )
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
+        if should_call_command:
+            # And that the rebase command was run with the selected URL
+            mock_run_command.assert_called_once_with(
+                ["sudo", "rpm-ostree", "rebase", "test-url"]
+            )
+        else:
+            # Verify that run_command was never called (since no URL was selected)
+            mock_run_command.assert_not_called()
 
-        rebase_command([])
-
-        # Verify that submenu was called
-        mock_show_rebase_submenu.assert_called_once()
-        # Verify that run_command was never called (since no URL was selected)
-        mock_run_command.assert_not_called()
-        # sys.exit should NOT be called when no selection is made
-        mock_sys_exit.assert_not_called()
+        if should_exit:
+            mock_sys_exit.assert_called_once_with(0)
+        else:
+            # sys.exit should NOT be called when no selection is made
+            mock_sys_exit.assert_not_called()
 
 
 class TestCommandsWithSubmenu:
@@ -233,45 +239,6 @@ class TestCommandsWithSubmenu:
         mock_sys_exit.assert_not_called()
 
 
-class TestCheckCommand:
-    """Unit tests for the check_command function."""
-
-    def test_check_command(self, mocker: MockerFixture):
-        """Test check_command executes correct command."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        check_command([])
-        mock_run_command.assert_called_once_with(["rpm-ostree", "upgrade", "--check"])
-        mock_sys_exit.assert_called_once_with(0)
-
-
-class TestLsCommand:
-    """Unit tests for the ls_command function."""
-
-    def test_ls_command(self, mocker: MockerFixture):
-        """Test ls_command executes correct command."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        ls_command([])
-        mock_run_command.assert_called_once_with(["rpm-ostree", "status", "-v"])
-        mock_sys_exit.assert_called_once_with(0)
-
-
-class TestRollbackCommand:
-    """Unit tests for the rollback_command function."""
-
-    def test_rollback_command(self, mocker: MockerFixture):
-        """Test rollback_command executes correct command."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        rollback_command([])
-        mock_run_command.assert_called_once_with(["sudo", "rpm-ostree", "rollback"])
-        mock_sys_exit.assert_called_once_with(0)
-
-
 class TestSimpleCommands:
     """Unit tests for simple commands that follow the same pattern."""
 
@@ -296,94 +263,6 @@ class TestSimpleCommands:
         # Verify the command was called with the expected arguments
         mock_run_command.assert_called_once_with(expected_cmd)
         # Verify sys.exit was called with the expected return code
-        mock_sys_exit.assert_called_once_with(0)
-
-    def test_upgrade_command_specific(self, mocker: MockerFixture):
-        """Test upgrade_command specifically."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        upgrade_command([])
-        mock_run_command.assert_called_once_with(["sudo", "rpm-ostree", "upgrade"])
-        mock_sys_exit.assert_called_once_with(0)
-
-
-class TestPinCommand:
-    """Unit tests for the pin_command function."""
-
-    def test_pin_command_with_number(self, mocker: MockerFixture):
-        """Test pin_command with valid number."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        pin_command(["1"])
-        mock_run_command.assert_called_once_with(
-            ["sudo", "ostree", "admin", "pin", "1"]
-        )
-        mock_sys_exit.assert_called_once_with(0)
-
-    @pytest.mark.parametrize(
-        "func,cmd,invalid_input,expected_msg",
-        [
-            (pin_command, "pin", "invalid", "Invalid deployment number: invalid"),
-            (unpin_command, "unpin", "invalid", "Invalid deployment number: invalid"),
-            (rm_command, "rm", "invalid", "Invalid deployment number: invalid"),
-        ],
-    )
-    def test_command_invalid_number(
-        self, mocker: MockerFixture, func, cmd, invalid_input, expected_msg
-    ):
-        """Test commands handle invalid number."""
-        mock_print = mocker.patch("urh.print")
-
-        func([invalid_input])
-        mock_print.assert_called_once_with(expected_msg)
-
-
-class TestUnpinCommand:
-    """Unit tests for the unpin_command function."""
-
-    def test_unpin_command_with_number(self, mocker: MockerFixture):
-        """Test unpin_command with valid number."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        unpin_command(["2"])
-        mock_run_command.assert_called_once_with(
-            ["sudo", "ostree", "admin", "pin", "-u", "2"]
-        )
-        mock_sys_exit.assert_called_once_with(0)
-
-    # Note: no_args and invalid_number tests are covered by parametrized tests in TestPinCommand
-
-
-class TestRmCommand:
-    """Unit tests for the rm_command function."""
-
-    def test_rm_command_with_number(self, mocker: MockerFixture):
-        """Test rm_command with valid number."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        rm_command(["3"])
-        mock_run_command.assert_called_once_with(
-            ["sudo", "ostree", "cleanup", "-r", "3"]
-        )
-        mock_sys_exit.assert_called_once_with(0)
-
-    # Note: no_args and invalid_number tests are covered by parametrized tests in TestPinCommand
-
-
-class TestUpgradeCommand:
-    """Unit tests for the upgrade_command function."""
-
-    def test_upgrade_command(self, mocker: MockerFixture):
-        """Test upgrade_command executes correct command."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        upgrade_command([])
-        mock_run_command.assert_called_once_with(["sudo", "rpm-ostree", "upgrade"])
         mock_sys_exit.assert_called_once_with(0)
 
 
@@ -1418,30 +1297,6 @@ class TestDeploymentCommands:
         )
         mock_sys_exit.assert_called_once_with(0)
 
-    def test_pin_command_invalid_number(self, mocker: MockerFixture):
-        """Test pin command handles invalid numbers properly."""
-        mock_print = mocker.patch("urh.print")
-
-        pin_command(["not_a_number"])
-
-        mock_print.assert_called_once_with("Invalid deployment number: not_a_number")
-
-    def test_unpin_command_invalid_number(self, mocker: MockerFixture):
-        """Test unpin command handles invalid numbers properly."""
-        mock_print = mocker.patch("urh.print")
-
-        unpin_command(["not_a_number"])
-
-        mock_print.assert_called_once_with("Invalid deployment number: not_a_number")
-
-    def test_rm_command_invalid_number(self, mocker: MockerFixture):
-        """Test rm command handles invalid numbers properly."""
-        mock_print = mocker.patch("urh.print")
-
-        rm_command(["not_a_number"])
-
-        mock_print.assert_called_once_with("Invalid deployment number: not_a_number")
-
     @pytest.mark.parametrize(
         "func,command_name,submenu_return_value,expected_cmd_with_filter",
         [
@@ -1544,95 +1399,53 @@ class TestDeploymentCommands:
 class TestMenuExitException:
     """Unit tests for the ESC-to-parent-menu behavior."""
 
-    def test_rebase_command_handles_menu_exit_exception(self, mocker: MockerFixture):
-        """Test that rebase_command properly handles MenuExitException."""
-        # Mock show_rebase_submenu to raise MenuExitException (simulating ESC press)
-        mock_show_rebase_submenu = mocker.patch(
-            "urh.show_rebase_submenu", side_effect=MenuExitException()
+    @pytest.mark.parametrize(
+        "command_func, submenu_func_name, expected_filter_func",
+        [
+            (rebase_command, "show_rebase_submenu", None),
+            (pin_command, "show_deployment_submenu", lambda d: not d["pinned"]),
+            (unpin_command, "show_deployment_submenu", lambda d: d["pinned"]),
+            (rm_command, "show_deployment_submenu", None),
+        ],
+    )
+    def test_command_handles_menu_exit_exception(
+        self,
+        mocker: MockerFixture,
+        command_func,
+        submenu_func_name,
+        expected_filter_func,
+    ):
+        """Test that each command properly handles MenuExitException."""
+        # Mock submenu function to raise MenuExitException (simulating ESC press)
+        mock_submenu_func = mocker.patch(
+            f"urh.{submenu_func_name}", side_effect=MenuExitException()
         )
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
 
-        # Call rebase_command with no args to trigger submenu
+        # Call the command with no args to trigger submenu
         with pytest.raises(MenuExitException):
-            rebase_command([])
+            command_func([])
 
         # Verify submenu was called
-        mock_show_rebase_submenu.assert_called_once()
-        # run_command should not be called since the exception was raised
-        mock_run_command.assert_not_called()
+        mock_submenu_func.assert_called_once()
 
-    def test_pin_command_handles_menu_exit_exception(self, mocker: MockerFixture):
-        """Test that pin_command properly handles MenuExitException."""
-        # Mock show_deployment_submenu to raise MenuExitException (simulating ESC press)
-        mock_show_deployment_submenu = mocker.patch(
-            "urh.show_deployment_submenu", side_effect=MenuExitException()
-        )
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        # If a filter function is expected, verify it was passed correctly
+        if expected_filter_func:
+            call_args = mock_submenu_func.call_args
+            assert call_args is not None
+            args, kwargs = call_args
+            assert "filter_func" in kwargs
+            filter_func = kwargs["filter_func"]
+            # Test the filter function behavior
+            unpinned_deployment = {"pinned": False}
+            pinned_deployment = {"pinned": True}
+            assert filter_func(unpinned_deployment) == expected_filter_func(
+                unpinned_deployment
+            )
+            assert filter_func(pinned_deployment) == expected_filter_func(
+                pinned_deployment
+            )
 
-        # Call pin_command with no args to trigger submenu
-        with pytest.raises(MenuExitException):
-            pin_command([])
-
-        # Verify submenu was called with the unpinned filter
-        mock_show_deployment_submenu.assert_called_once()
-        call_args = mock_show_deployment_submenu.call_args
-        assert call_args is not None
-        args, kwargs = call_args
-        assert "filter_func" in kwargs
-        # Apply the filter function to verify it filters appropriately
-        filter_func = kwargs["filter_func"]
-        unpinned_deployment = {"pinned": False}
-        pinned_deployment = {"pinned": True}
-        # pin command should filter for unpinned deployments
-        assert filter_func(unpinned_deployment)
-        assert not filter_func(pinned_deployment)
-
-        # run_command should not be called since the exception was raised
-        mock_run_command.assert_not_called()
-
-    def test_unpin_command_handles_menu_exit_exception(self, mocker: MockerFixture):
-        """Test that unpin_command properly handles MenuExitException."""
-        # Mock show_deployment_submenu to raise MenuExitException (simulating ESC press)
-        mock_show_deployment_submenu = mocker.patch(
-            "urh.show_deployment_submenu", side_effect=MenuExitException()
-        )
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-
-        # Call unpin_command with no args to trigger submenu
-        with pytest.raises(MenuExitException):
-            unpin_command([])
-
-        # Verify submenu was called with the pinned filter
-        mock_show_deployment_submenu.assert_called_once()
-        call_args = mock_show_deployment_submenu.call_args
-        assert call_args is not None
-        args, kwargs = call_args
-        assert "filter_func" in kwargs
-        # Apply the filter function to verify it filters appropriately
-        filter_func = kwargs["filter_func"]
-        unpinned_deployment = {"pinned": False}
-        pinned_deployment = {"pinned": True}
-        # unpin command should filter for pinned deployments
-        assert filter_func(pinned_deployment)
-        assert not filter_func(unpinned_deployment)
-
-        # run_command should not be called since the exception was raised
-        mock_run_command.assert_not_called()
-
-    def test_rm_command_handles_menu_exit_exception(self, mocker: MockerFixture):
-        """Test that rm_command properly handles MenuExitException."""
-        # Mock show_deployment_submenu to raise MenuExitException (simulating ESC press)
-        mock_show_deployment_submenu = mocker.patch(
-            "urh.show_deployment_submenu", side_effect=MenuExitException()
-        )
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
-
-        # Call rm_command with no args to trigger submenu
-        with pytest.raises(MenuExitException):
-            rm_command([])
-
-        # Verify submenu was called
-        mock_show_deployment_submenu.assert_called_once()
         # run_command should not be called since the exception was raised
         mock_run_command.assert_not_called()
 
