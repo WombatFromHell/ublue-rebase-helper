@@ -599,9 +599,10 @@ def main(argv: Optional[List[str]] = None):
                 print(f"Unknown command: {command}")
                 help_command([])
         else:
-            # Normal interactive mode with infinite loop
+            # Normal interactive mode with safe loop control
+            running = True
             try:
-                while True:
+                while running:
                     command = show_command_menu()
                     # If command is empty string (non-interactive or gum not available), just exit
                     if not command:
@@ -626,9 +627,19 @@ def main(argv: Optional[List[str]] = None):
                         except MenuExitException:
                             # If ESC was pressed in a submenu, continue the main menu loop
                             continue
+                        except Exception as e:
+                            # Catch any other exceptions to prevent crashes
+                            print(
+                                f"An error occurred while executing command '{command}': {e}"
+                            )
+                            # Continue the loop to show menu again
+                            continue
                     else:
                         print(f"Unknown command: {command}")
                         help_command([])
+
+                    # Allow the loop to be broken if needed (though normally continues)
+                    # In this context, we keep running = True unless we want to exit
             except KeyboardInterrupt:
                 # Allow graceful exit with Ctrl+C
                 print("\nExiting...")

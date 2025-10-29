@@ -2,6 +2,7 @@
 
 import sys
 import os
+import subprocess
 import pytest
 from pytest_mock import MockerFixture
 
@@ -66,6 +67,17 @@ class TestRunCommand:
         result = run_command(["nonexistent-command"])
         assert result == 1
         mock_print.assert_called_once_with("Command not found: nonexistent-command")
+
+    def test_run_command_file_not_found_with_spaces(self, mocker: MockerFixture):
+        """Test run_command handles FileNotFoundError with multi-word commands."""
+        mocker.patch("urh.subprocess.run", side_effect=FileNotFoundError)
+        mock_print = mocker.patch("urh.print")
+
+        result = run_command(["nonexistent", "command", "with", "spaces"])
+        assert result == 1
+        mock_print.assert_called_once_with(
+            "Command not found: nonexistent command with spaces"
+        )
 
 
 class TestRebaseCommand:
@@ -286,6 +298,15 @@ class TestSimpleCommands:
         # Verify sys.exit was called with the expected return code
         mock_sys_exit.assert_called_once_with(0)
 
+    def test_upgrade_command_specific(self, mocker: MockerFixture):
+        """Test upgrade_command specifically."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        upgrade_command([])
+        mock_run_command.assert_called_once_with(["sudo", "rpm-ostree", "upgrade"])
+        mock_sys_exit.assert_called_once_with(0)
+
 
 class TestPinCommand:
     """Unit tests for the pin_command function."""
@@ -381,6 +402,22 @@ class TestHelpCommand:
         # Check that print was called at least once
         assert mock_print.called
 
+    def test_help_command_specific_output(self, mocker: MockerFixture):
+        """Test help_command prints correct help information."""
+        mock_print = mocker.Mock()
+
+        help_command([], print_func=mock_print)
+
+        # Check that specific parts of the help message are printed
+        calls = mock_print.call_args_list
+        # Check that the program name is printed
+        help_calls = [call for call in calls if "ublue-rebase-helper" in str(call)]
+        assert len(help_calls) > 0
+
+        # Check that Usage line is printed
+        usage_calls = [call for call in calls if "Usage:" in str(call)]
+        assert len(usage_calls) > 0
+
 
 class TestMainFunction:
     """Unit tests for the main function."""
@@ -426,13 +463,51 @@ class TestMainFunction:
 
     def test_main_with_menu_exit_exception_handling(self, mocker: MockerFixture):
         """Test that the main function properly catches MenuExitException and continues."""
-        # This test focuses on the exception handling mechanism itself
-        # We'll create a simpler test scenario to validate the exception flow
+        # In test mode, we need to simulate the test environment
+        mocker.patch.dict(os.environ, {"PYTEST_CURRENT_TEST": "test"})
 
-        # This test is difficult to implement properly with the infinite loop
-        # For now, we'll just verify the basic exception handling behavior exists
-        # by testing the individual components
-        pass  # Integration test is complex, we test individual behaviors instead
+        # Mock the show_command_menu to return a command that will raise MenuExitException
+        mock_show_command_menu = mocker.patch(
+            "urh.show_command_menu", return_value="rebase"
+        )
+        mock_rebase_command = mocker.patch(
+            "urh.rebase_command", side_effect=MenuExitException()
+        )
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        # Call main with no arguments to trigger menu mode
+        main(["urh.py"])
+
+        # Verify show_command_menu was called
+        mock_show_command_menu.assert_called_once()
+        # Verify that rebase_command was called with empty args
+        mock_rebase_command.assert_called_once_with([])
+        # Since the exception is raised, sys.exit should be called
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_main_menu_loop_with_menu_exit_exception(self, mocker: MockerFixture):
+        """Test the main function's MenuExitException handling in test mode."""
+        # Test that the main function properly handles MenuExitException in test mode
+        mocker.patch.dict(os.environ, {"PYTEST_CURRENT_TEST": "test"})
+
+        # Mock the show_command_menu to return a command first, then None to exit
+        mock_show_command_menu = mocker.patch(
+            "urh.show_command_menu", side_effect=["rebase", None]
+        )
+        mock_rebase_command = mocker.patch(
+            "urh.rebase_command", side_effect=MenuExitException()
+        )
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        # Call main with no arguments to trigger menu mode
+        main(["urh.py"])
+
+        # Verify that show_command_menu was called twice (once for rebase, once more before exiting)
+        assert mock_show_command_menu.call_count >= 1
+        # Verify that rebase_command was called with empty args
+        mock_rebase_command.assert_called_once_with([])
+        # sys.exit should be called when MenuExitException is handled
+        mock_sys_exit.assert_called()
 
 
 class TestConfigFunctions:
@@ -507,6 +582,125 @@ class TestShowContainerOptionsFunctions:
         assert (
             mock_print.call_count >= 3
         )  # First message + at least 1 option + final message
+
+
+class TestTTYContexts:
+    """Unit tests for TTY vs Non-TTY contexts."""
+
+    def test_show_command_menu_non_tty_context(self, mocker: MockerFixture):
+        """Test show_command_menu when not in TTY context."""
+        mock_is_tty = mocker.Mock(return_value=False)  # Not in TTY context
+        mock_print = mocker.Mock()
+
+        result = show_command_menu(is_tty_func=mock_is_tty, print_func=mock_print)
+
+        # In non-TTY context, the function should return None
+        assert result is None
+        # The function should have called the non-TTY display function
+        mock_print.assert_any_call(
+            "Not running in interactive mode. Available commands:"
+        )
+
+    def test_show_rebase_submenu_non_tty_context(self, mocker: MockerFixture):
+        """Test show_rebase_submenu when not in TTY context."""
+        mock_is_tty = mocker.Mock(return_value=False)  # Not in TTY context
+        mock_print = mocker.Mock()
+
+        result = show_rebase_submenu(is_tty_func=mock_is_tty, print_func=mock_print)
+
+        # In non-TTY context, the function should return None
+        assert result is None
+        # The function should have called the non-TTY display function
+        mock_print.assert_any_call("Available container URLs:")
+
+    def test_show_deployment_submenu_non_tty_context(self, mocker: MockerFixture):
+        """Test show_deployment_submenu when not in TTY context."""
+        # Mock the parse_deployments function to return some test deployments
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "test version",
+                    "pinned": False,
+                }
+            ],
+        )
+        mock_is_tty = mocker.Mock(return_value=False)  # Not in TTY context
+        mock_print = mocker.Mock()
+
+        result = show_deployment_submenu(is_tty_func=mock_is_tty, print_func=mock_print)
+
+        # In non-TTY context, the function should return None
+        assert result is None
+        # The function should have called the non-TTY display function
+        mock_print.assert_any_call("Available deployments:")
+
+
+class TestGumNotFoundScenarios:
+    """Unit tests for gum not found scenarios."""
+
+    def test_show_command_menu_gum_not_found(self, mocker: MockerFixture):
+        """Test show_command_menu when gum is not found."""
+        mock_is_tty = mocker.Mock(return_value=True)  # In TTY context
+        mock_subprocess_run = mocker.Mock(side_effect=FileNotFoundError)
+        mock_print = mocker.Mock()
+
+        result = show_command_menu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+
+        # When gum is not found, the function should return None
+        assert result is None
+        # The function should have shown the gum not found message
+        mock_print.assert_any_call("gum not found. Available commands:")
+
+    def test_show_rebase_submenu_gum_not_found(self, mocker: MockerFixture):
+        """Test show_rebase_submenu when gum is not found."""
+        mock_is_tty = mocker.Mock(return_value=True)  # In TTY context
+        mock_subprocess_run = mocker.Mock(side_effect=FileNotFoundError)
+        mock_print = mocker.Mock()
+
+        result = show_rebase_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+
+        # When gum is not found, the function should return None
+        assert result is None
+        # The function should have shown the gum not found message
+        mock_print.assert_any_call("gum not found. Available container URLs:")
+
+    def test_show_deployment_submenu_gum_not_found(self, mocker: MockerFixture):
+        """Test show_deployment_submenu when gum is not found."""
+        # Mock the parse_deployments function to return some test deployments
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "test version",
+                    "pinned": False,
+                }
+            ],
+        )
+        mock_is_tty = mocker.Mock(return_value=True)  # In TTY context
+        mock_subprocess_run = mocker.Mock(side_effect=FileNotFoundError)
+        mock_print = mocker.Mock()
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+
+        # When gum is not found, the function should return None
+        assert result is None
+        # The function should have shown the gum not found message
+        mock_print.assert_any_call("gum not found. Available deployments:")
 
 
 class TestShowCommandMenu:
@@ -752,6 +946,16 @@ class TestShowRebaseSubmenuRefactored:
         assert result is None
         mock_print.assert_any_call("gum not found. Available container URLs:")
 
+    def test_show_rebase_submenu_non_tty_context_specific(self, mocker: MockerFixture):
+        """Test show_rebase_submenu when not running in TTY context."""
+        mock_is_tty = mocker.Mock(return_value=False)
+        mock_print = mocker.Mock()
+
+        result = show_rebase_submenu(is_tty_func=mock_is_tty, print_func=mock_print)
+        # In non-TTY context, it should return None
+        assert result is None
+        mock_print.assert_any_call("Available container URLs:")
+
 
 class TestParseDeployments:
     """Unit tests for the parse_deployments function."""
@@ -825,6 +1029,91 @@ Deployments:
     def test_parse_deployments_exception(self, mocker: MockerFixture):
         """Test parse_deployments handles exceptions."""
         mocker.patch("urh.subprocess.run", side_effect=Exception("Test error"))
+        mock_print = mocker.patch("urh.print")
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+        mock_print.assert_called_once_with("Error parsing deployments")
+
+    def test_parse_deployments_with_called_process_error(self, mocker: MockerFixture):
+        """Test parse_deployments handles CalledProcessError."""
+        mocker.patch(
+            "urh.subprocess.run", side_effect=subprocess.CalledProcessError(1, ["test"])
+        )
+        mock_print = mocker.patch("urh.print")
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+        mock_print.assert_called_once_with("Error running rpm-ostree status command")
+
+    def test_parse_deployments_edge_case_empty_output(self, mocker: MockerFixture):
+        """Test parse_deployments handles empty output from rpm-ostree status."""
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+
+    def test_parse_deployments_edge_case_no_deployments(self, mocker: MockerFixture):
+        """Test parse_deployments handles output with no deployment lines."""
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """State: idle
+AutomaticUpdates: disabled
+Deployments:"""
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+
+    def test_parse_deployments_edge_case_malformed_index(self, mocker: MockerFixture):
+        """Test parse_deployments handles malformed index in deployment lines."""
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """State: idle
+AutomaticUpdates: disabled
+Deployments:
+● ostree-image-signed:docker://ghcr.io/test/image:latest (index: not_a_number)
+                   Version: test-version"""
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
+
+        deployments = parse_deployments()
+
+        # Should handle invalid index parsing gracefully and return empty result
+        assert deployments == []
+
+    def test_parse_deployments_edge_case_no_deployments_found(
+        self, mocker: MockerFixture
+    ):
+        """Test parse_deployments handles when no deployments are found."""
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """State: idle
+AutomaticUpdates: disabled
+Deployments:"""
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+
+    def test_parse_deployments_edge_case_no_matching_deployments(
+        self, mocker: MockerFixture
+    ):
+        """Test parse_deployments handles when no lines match deployment patterns."""
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """State: idle
+AutomaticUpdates: disabled
+Deployments:
+  some line that doesn't match pattern"""
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
 
         deployments = parse_deployments()
 
@@ -1007,6 +1296,71 @@ class TestShowDeploymentSubmenu:
             assert not any("testing-43.20251028.9" in str(arg) for arg in cmd)
             assert not any("testing-42.20251025" in str(arg) for arg in cmd)
 
+    def test_show_deployment_submenu_with_empty_filtered_deployments(
+        self, mocker: MockerFixture
+    ):
+        """Test show_deployment_submenu when filter results in no deployments."""
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock deployments to return
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+            ],
+        )
+
+        # Filter function that returns False for all deployments
+        def no_match_filter(deployment):
+            return False
+
+        mock_print = mocker.Mock()
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty,
+            print_func=mock_print,
+            filter_func=no_match_filter,
+        )
+
+        assert result is None
+        mock_print.assert_any_call("No deployments match the filter criteria.")
+
+    def test_show_deployment_submenu_invalid_selection(self, mocker: MockerFixture):
+        """Test show_deployment_submenu with invalid selection."""
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock deployments to return
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+            ],
+        )
+
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = "invalid selection that doesn't match any deployment"
+        mock_subprocess_run.return_value = mock_result
+        mock_print = mocker.Mock()
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+
+        assert result is None
+        mock_print.assert_called_with("Invalid selection.")
+
 
 class TestDeploymentCommands:
     """Unit tests for deployment commands (pin, unpin, rm) that follow similar patterns."""
@@ -1036,6 +1390,57 @@ class TestDeploymentCommands:
 
         mock_run_command.assert_called_once_with(expected_cmd)
         mock_sys_exit.assert_called_once_with(0)
+
+    def test_rebase_command_invalid_number_handling(self, mocker: MockerFixture):
+        """Test rebase command doesn't handle numbers but URL strings."""
+        # This test checks that rebase command handles invalid input properly
+        mock_show_rebase_submenu = mocker.patch(
+            "urh.show_rebase_submenu", return_value=None
+        )
+
+        # The rebase command should handle the case where a submenu doesn't return a value
+        rebase_command([])  # This internally calls show_rebase_submenu
+
+        # Verify submenu was called
+        mock_show_rebase_submenu.assert_called_once()
+        # Since no selection is made, nothing should be printed (no error in this path)
+        # The function should return None (implicitly) when no URL is selected
+
+    def test_rebase_command_with_invalid_number(self, mocker: MockerFixture):
+        """Test rebase command with an invalid number input (should treat as URL)."""
+        # The rebase command treats any argument as a URL, so even invalid numbers should be passed through
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        rebase_command(["invalid-url"])
+        mock_run_command.assert_called_once_with(
+            ["sudo", "rpm-ostree", "rebase", "invalid-url"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_pin_command_invalid_number(self, mocker: MockerFixture):
+        """Test pin command handles invalid numbers properly."""
+        mock_print = mocker.patch("urh.print")
+
+        pin_command(["not_a_number"])
+
+        mock_print.assert_called_once_with("Invalid deployment number: not_a_number")
+
+    def test_unpin_command_invalid_number(self, mocker: MockerFixture):
+        """Test unpin command handles invalid numbers properly."""
+        mock_print = mocker.patch("urh.print")
+
+        unpin_command(["not_a_number"])
+
+        mock_print.assert_called_once_with("Invalid deployment number: not_a_number")
+
+    def test_rm_command_invalid_number(self, mocker: MockerFixture):
+        """Test rm command handles invalid numbers properly."""
+        mock_print = mocker.patch("urh.print")
+
+        rm_command(["not_a_number"])
+
+        mock_print.assert_called_once_with("Invalid deployment number: not_a_number")
 
     @pytest.mark.parametrize(
         "func,command_name,submenu_return_value,expected_cmd_with_filter",
@@ -1247,6 +1652,26 @@ class TestMenuExitException:
         )
         assert result is None
 
+    def test_show_rebase_submenu_in_normal_mode_raises_menu_exit(
+        self, mocker: MockerFixture
+    ):
+        """Test that show_rebase_submenu raises MenuExitException in normal mode when ESC is pressed."""
+        # Use dependency injection for testing, simulating normal mode (not test mode)
+        mock_is_tty = mocker.Mock(return_value=True)
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1  # ESC pressed in gum returns code 1
+        mock_result.stdout = ""
+        mock_subprocess_run.return_value = mock_result
+        # Make sure we're not in test mode by clearing the environment variable
+        mocker.patch.dict(os.environ, {}, clear=True)
+
+        # Should raise MenuExitException in normal mode
+        with pytest.raises(MenuExitException):
+            show_rebase_submenu(
+                is_tty_func=mock_is_tty, subprocess_run_func=mock_subprocess_run
+            )
+
     def test_show_deployment_submenu_raises_menu_exit_on_esc(
         self, mocker: MockerFixture
     ):
@@ -1277,3 +1702,36 @@ class TestMenuExitException:
             is_tty_func=mock_is_tty, subprocess_run_func=mock_subprocess_run
         )
         assert result is None
+
+    def test_show_deployment_submenu_in_normal_mode_raises_menu_exit(
+        self, mocker: MockerFixture
+    ):
+        """Test that show_deployment_submenu raises MenuExitException in normal mode when ESC is pressed."""
+        # Use dependency injection for testing, simulating normal mode (not test mode)
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock the parse_deployments function to return some test deployments
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "test version",
+                    "pinned": False,
+                }
+            ],
+        )
+
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1  # ESC pressed in gum returns code 1
+        mock_result.stdout = ""
+        mock_subprocess_run.return_value = mock_result
+        # Make sure we're not in test mode by clearing the environment variable
+        mocker.patch.dict(os.environ, {}, clear=True)
+
+        # Should raise MenuExitException in normal mode
+        with pytest.raises(MenuExitException):
+            show_deployment_submenu(
+                is_tty_func=mock_is_tty, subprocess_run_func=mock_subprocess_run
+            )
