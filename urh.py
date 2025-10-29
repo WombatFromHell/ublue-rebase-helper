@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+# pyright: strict
 
 import subprocess
 import sys
+import os
 from typing import List
 
 
@@ -17,63 +19,58 @@ def run_command(cmd: List[str]) -> int:
 
 def show_command_menu() -> str:
     """Show a menu of available commands using gum."""
-    commands = [
-        "rebase <url>     - Rebase to a container image",
-        "check            - Check for available updates",
-        "ls               - List deployments with details",
-        "rollback         - Roll back to the previous deployment",
-        "pin <num>        - Pin a deployment",
-        "unpin <num>      - Unpin a deployment",
-        "rm <num>         - Remove a deployment",
-        "help             - Show this help message",
+    # Create commands with descriptions for better user experience
+    commands_with_descriptions = [
+        "rebase - Rebase to a container image",
+        "check - Check for available updates",
+        "ls - List deployments with details",
+        "rollback - Roll back to the previous deployment",
+        "pin - Pin a deployment",
+        "unpin - Unpin a deployment",
+        "rm - Remove a deployment",
+        "help - Show this help message",
     ]
 
     # Use gum to show the menu and get user selection
     try:
-        result = subprocess.run(
-            ["gum", "choose", "--cursor", "→", "--selected.cursor", "✓"] + commands,
-            text=True,
-            capture_output=True,
-        )
+        # Check if we're running in a TTY context before using gum
+        if os.isatty(0):  # stdin is a TTY
+            result = subprocess.run(
+                ["gum", "choose", "--cursor", "→", "--selected-prefix", "✓ "]
+                + commands_with_descriptions,
+                text=True,
+                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
+                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
+            )
 
-        if result.returncode == 0:
-            # Extract the command name from the selection
-            selected = result.stdout.strip().split()[0]
-            return selected
+            if result.returncode == 0:
+                selected_with_desc = result.stdout.strip()
+                # Extract just the command name from the selected option
+                command = (
+                    selected_with_desc.split(" - ")[0]
+                    if " - " in selected_with_desc
+                    else selected_with_desc
+                )
+                return command
+            else:
+                # gum failed or no selection made, show help
+                print("No command selected.")
+                return "help"
         else:
-            print("No command selected or gum not available.")
-            return "help"
+            # Not running in TTY, show the command list only (don't return "help" to avoid duplicate output)
+            print("Not running in interactive mode. Available commands:")
+            for cmd_desc in commands_with_descriptions:
+                print(f"  {cmd_desc}")
+            print("\nRun 'urh.py help' for more information.")
+            return ""  # Return empty string to indicate no command should be executed
     except FileNotFoundError:
+        # Show full descriptions when gum is not found
         print("gum not found. Available commands:")
-        for cmd in commands:
-            print(f"  {cmd}")
-        return "help"
-
-
-def main():
-    if len(sys.argv) < 2:
-        # No command provided, show menu
-        command = show_command_menu()
-    else:
-        command = sys.argv[1]
-
-    # Map commands to their respective functions
-    command_map = {
-        "rebase": rebase_command,
-        "check": check_command,
-        "ls": ls_command,
-        "rollback": rollback_command,
-        "pin": pin_command,
-        "unpin": unpin_command,
-        "rm": rm_command,
-        "help": help_command,
-    }
-
-    if command in command_map:
-        command_map[command](sys.argv[2:])
-    else:
-        print(f"Unknown command: {command}")
-        help_command([])
+        for cmd_desc in commands_with_descriptions:
+            print(f"  {cmd_desc}")
+        print("\nRun 'urh.py help' for more information.")
+        # When gum isn't available, return empty string to avoid duplicate output
+        return ""
 
 
 def rebase_command(args: List[str]):
@@ -164,6 +161,34 @@ def help_command(args: List[str]):
     print("  help             - Show this help message")
 
 
+def main():
+    if len(sys.argv) < 2:
+        # No command provided, show menu
+        command = show_command_menu()
+        # If command is empty string (non-interactive or gum not available), just exit
+        if not command:
+            sys.exit(0)
+    else:
+        command = sys.argv[1]
+
+    # Map commands to their respective functions
+    command_map = {
+        "rebase": rebase_command,
+        "check": check_command,
+        "ls": ls_command,
+        "rollback": rollback_command,
+        "pin": pin_command,
+        "unpin": unpin_command,
+        "rm": rm_command,
+        "help": help_command,
+    }
+
+    if command in command_map:
+        command_map[command](sys.argv[2:])
+    else:
+        print(f"Unknown command: {command}")
+        help_command([])
+
+
 if __name__ == "__main__":
     main()
-
