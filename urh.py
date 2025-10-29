@@ -102,9 +102,12 @@ def show_command_menu(
                 )
                 return command
             else:
-                # gum failed or no selection made, show help
-                print_func("No command selected.")
-                return "help"
+                # gum failed or no selection made (ESC or Ctrl+C)
+                # Check if stdout contains "nothing selected" to avoid duplicate output
+                stdout_content = result.stdout.strip() if result.stdout else ""
+                if stdout_content != "nothing selected":
+                    print_func("No command selected.")
+                return ""
         else:
             # Not running in TTY, show the command list only (don't return "help" to avoid duplicate output)
             return show_commands_non_tty(print_func)
@@ -179,7 +182,10 @@ def show_rebase_submenu(
                     return selected_option  # Fallback in case format is unexpected
             else:
                 # gum failed or no selection made (ESC or Ctrl+C)
-                print_func("No option selected.")
+                # Check if stdout contains "nothing selected" to avoid duplicate output
+                stdout_content = result.stdout.strip() if result.stdout else ""
+                if stdout_content != "nothing selected":
+                    print_func("No option selected.")
                 return ""
         else:
             # Not running in TTY, show the list only
@@ -227,46 +233,273 @@ def rollback_command(args: List[str]):
     sys.exit(run_command(cmd))
 
 
-def pin_command(args: List[str]):
+def pin_command(
+    args: List[str],
+    show_deployment_submenu_func: Optional[Callable[..., Optional[int]]] = None,
+):
     """Handle the pin command."""
+    if show_deployment_submenu_func is None:
+        show_deployment_submenu_func = show_deployment_submenu
+
     if not args:
-        print("Usage: urh.py pin <num>")
-        return
+        # No number provided, show submenu to select deployment (that isn't already pinned)
+        def not_pinned_filter(deployment: Dict[str, Any]) -> bool:
+            return not deployment["pinned"]
 
-    try:
-        deploy_num = int(args[0])
-        cmd = ["sudo", "ostree", "admin", "pin", str(deploy_num)]
-        sys.exit(run_command(cmd))
-    except ValueError:
-        print(f"Invalid deployment number: {args[0]}")
+        selected_index = show_deployment_submenu_func(filter_func=not_pinned_filter)
+        if selected_index is None:
+            return  # No selection made, exit gracefully
+        deploy_num = selected_index
+    else:
+        try:
+            deploy_num = int(args[0])
+        except ValueError:
+            print(f"Invalid deployment number: {args[0]}")
+            return
+
+    cmd = ["sudo", "ostree", "admin", "pin", str(deploy_num)]
+    sys.exit(run_command(cmd))
 
 
-def unpin_command(args: List[str]):
+def unpin_command(
+    args: List[str],
+    show_deployment_submenu_func: Optional[Callable[..., Optional[int]]] = None,
+):
     """Handle the unpin command."""
+    if show_deployment_submenu_func is None:
+        show_deployment_submenu_func = show_deployment_submenu
+
     if not args:
-        print("Usage: urh.py unpin <num>")
-        return
+        # No number provided, show submenu to select deployment (that is already pinned)
+        def pinned_filter(deployment: Dict[str, Any]) -> bool:
+            return deployment["pinned"]
+
+        selected_index = show_deployment_submenu_func(filter_func=pinned_filter)
+        if selected_index is None:
+            return  # No selection made, exit gracefully
+        deploy_num = selected_index
+    else:
+        try:
+            deploy_num = int(args[0])
+        except ValueError:
+            print(f"Invalid deployment number: {args[0]}")
+            return
+
+    cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deploy_num)]
+    sys.exit(run_command(cmd))
+
+
+def parse_deployments() -> List[Dict[str, Any]]:
+    """Parse rpm-ostree status -v to extract deployment information."""
+    try:
+        result = subprocess.run(
+            ["rpm-ostree", "status", "-v"], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print("Error getting deployments")
+            return []
+
+        deployments: List[Dict[str, Any]] = []
+        lines = result.stdout.split("\n")
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].rstrip()  # Use rstrip() to preserve indentation
+
+            # Check if this line starts a new deployment (starts with ● or space)
+            if line.startswith("●") or (
+                line.startswith(" ") and "ostree-image-signed:" in line
+            ):
+                # This is a deployment line, extract the index
+                deployment_info: Dict[str, Any] = {
+                    "index": None,
+                    "version": None,
+                    "pinned": False,
+                    "current": line.startswith(
+                        "●"
+                    ),  # Mark if it's the current deployment
+                }
+
+                # Extract index from this line
+                if "index:" in line:
+                    start_idx = line.find("index:") + len("index:")
+                    end_idx = line.find(")", start_idx)
+                    if end_idx != -1:
+                        index_str = line[start_idx:end_idx].strip()
+                        try:
+                            deployment_info["index"] = int(index_str)
+                        except ValueError:
+                            pass  # Keep as None if can't parse
+
+                # Continue processing subsequent lines for this deployment
+                i += 1
+                while i < len(lines):
+                    next_line = lines[i].strip()
+
+                    # If we hit an empty line or a new deployment, break
+                    if (
+                        not next_line
+                        or next_line.startswith("●")
+                        or next_line.startswith(" ")
+                        and "ostree-image-signed:" in next_line
+                    ):
+                        break
+
+                    # Look for Version field
+                    if next_line.startswith("Version:"):
+                        version_info = next_line[len("Version:") :].strip()
+                        deployment_info["version"] = version_info
+
+                    # Look for Pinned field
+                    elif next_line.startswith("Pinned:"):
+                        pinned_info = next_line[len("Pinned:") :].strip()
+                        deployment_info["pinned"] = pinned_info.lower() == "yes"
+
+                    i += 1
+
+                # Add this deployment to our list
+                if deployment_info["index"] is not None:
+                    deployments.append(deployment_info)
+
+                # Don't increment i here since we already did it in the inner loop
+                continue  # Continue to the next iteration of the outer loop
+
+            i += 1
+
+        return deployments
+
+    except subprocess.CalledProcessError:
+        print("Error running rpm-ostree status command")
+        return []
+    except Exception:
+        print("Error parsing deployments")
+        return []
+
+
+def show_deployment_submenu(
+    is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
+    subprocess_run_func: Callable[..., Any] = subprocess.run,
+    print_func: Callable[[str], Any] = print,
+    filter_func: Optional[Callable[[Dict[str, Any]], bool]] = None,
+) -> Optional[int]:
+    """Show a submenu of deployments using gum."""
+    deployments = parse_deployments()
+
+    if not deployments:
+        print_func("No deployments found.")
+        return None
+
+    # Apply filter if provided
+    if filter_func:
+        deployments = [d for d in deployments if filter_func(d)]
+
+    if not deployments:
+        print_func("No deployments match the filter criteria.")
+        return None
+
+    # Create options for gum with version info
+    options: List[str] = []
+    deployment_map: Dict[str, int] = {}
+
+    for deployment in deployments:
+        # Create display string with version info
+        version_info = (
+            deployment["version"] if deployment["version"] else "Unknown Version"
+        )
+
+        # Add pinning status for pin/unpin commands
+        pin_status = ""
+        if "pinned" in deployment:
+            pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
+
+        option_text = f"{version_info}{pin_status}"
+        options.append(option_text)
+        deployment_map[option_text] = deployment["index"]
 
     try:
-        deploy_num = int(args[0])
-        cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deploy_num)]
-        sys.exit(run_command(cmd))
-    except ValueError:
-        print(f"Invalid deployment number: {args[0]}")
+        # Check if we're running in a TTY context before using gum
+        if is_tty_func():  # stdout is a TTY
+            result = subprocess_run_func(
+                [
+                    "gum",
+                    "choose",
+                    "--cursor",
+                    "→",
+                    "--selected-prefix",
+                    "✓ ",
+                    "--header",
+                    "Select deployment (ESC to cancel):",
+                ]
+                + options,
+                text=True,
+                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
+                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
+            )
+
+            if result.returncode == 0:
+                selected_option = result.stdout.strip()
+                # Get the corresponding deployment index
+                if selected_option in deployment_map:
+                    return deployment_map[selected_option]
+                else:
+                    print_func("Invalid selection.")
+                    return None
+            else:
+                # gum failed or no selection made (ESC or Ctrl+C)
+                # Check if stdout contains "nothing selected" to avoid duplicate output
+                stdout_content = result.stdout.strip() if result.stdout else ""
+                if stdout_content != "nothing selected":
+                    print_func("No option selected.")
+                return None
+        else:
+            # Not running in TTY, show the list only
+            print_func("Available deployments:")
+            for deployment in deployments:
+                version_info = (
+                    deployment["version"]
+                    if deployment["version"]
+                    else "Unknown Version"
+                )
+                pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
+                print_func(f"  {deployment['index']}: {version_info}{pin_status}")
+            print_func("\nRun with deployment number directly (e.g., urh.py rm 0).")
+            return None
+    except FileNotFoundError:
+        # gum not found, show the list only
+        print_func("gum not found. Available deployments:")
+        for deployment in deployments:
+            version_info = (
+                deployment["version"] if deployment["version"] else "Unknown Version"
+            )
+            pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
+            print_func(f"  {deployment['index']}: {version_info}{pin_status}")
+        print_func("\nRun with deployment number directly (e.g., urh.py rm 0).")
+        return None
 
 
-def rm_command(args: List[str]):
+def rm_command(
+    args: List[str],
+    show_deployment_submenu_func: Optional[Callable[..., Optional[int]]] = None,
+):
     """Handle the rm command."""
-    if not args:
-        print("Usage: urh.py rm <num>")
-        return
+    if show_deployment_submenu_func is None:
+        show_deployment_submenu_func = show_deployment_submenu
 
-    try:
-        deploy_num = int(args[0])
-        cmd = ["sudo", "ostree", "cleanup", "-r", str(deploy_num)]
-        sys.exit(run_command(cmd))
-    except ValueError:
-        print(f"Invalid deployment number: {args[0]}")
+    if not args:
+        # No number provided, show submenu to select deployment
+        selected_index = show_deployment_submenu_func()
+        if selected_index is None:
+            return  # No selection made, exit gracefully
+        deploy_num = selected_index
+    else:
+        try:
+            deploy_num = int(args[0])
+        except ValueError:
+            print(f"Invalid deployment number: {args[0]}")
+            return
+
+    cmd = ["sudo", "ostree", "cleanup", "-r", str(deploy_num)]
+    sys.exit(run_command(cmd))
 
 
 def upgrade_command(args: List[str]):
@@ -326,10 +559,6 @@ def main(argv: Optional[List[str]] = None):
     else:
         print(f"Unknown command: {command}")
         help_command([])
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

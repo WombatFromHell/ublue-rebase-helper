@@ -127,9 +127,7 @@ class TestCheckCommand:
         mock_sys_exit = mocker.patch("urh.sys.exit")
 
         check_command([])
-        mock_run_command.assert_called_once_with(
-            ["sudo", "rpm-ostree", "upgrade", "--check"]
-        )
+        mock_run_command.assert_called_once_with(["rpm-ostree", "upgrade", "--check"])
         mock_sys_exit.assert_called_once_with(0)
 
 
@@ -172,23 +170,6 @@ class TestPinCommand:
             ["sudo", "ostree", "admin", "pin", "1"]
         )
         mock_sys_exit.assert_called_once_with(0)
-
-    @pytest.mark.parametrize(
-        "func,cmd,args,expected_msg",
-        [
-            (pin_command, "pin", [], "Usage: urh.py pin <num>"),
-            (unpin_command, "unpin", [], "Usage: urh.py unpin <num>"),
-            (rm_command, "rm", [], "Usage: urh.py rm <num>"),
-        ],
-    )
-    def test_command_no_args(
-        self, mocker: MockerFixture, func, cmd, args, expected_msg
-    ):
-        """Test commands print usage when no args provided."""
-        mock_print = mocker.patch("urh.print")
-
-        func(args)
-        mock_print.assert_called_once_with(expected_msg)
 
     @pytest.mark.parametrize(
         "func,cmd,invalid_input,expected_msg",
@@ -540,8 +521,8 @@ class TestShowCommandMenu:
             print_func=mock_print,
         )
 
-        # When gum returns non-zero exit code (no selection), it should return "help"
-        assert result == "help"
+        # When gum returns non-zero exit code (no selection), it should return empty string to avoid help duplication
+        assert result == ""
         # And should print a message about no command being selected
         mock_print.assert_called_with("No command selected.")
 
@@ -635,3 +616,500 @@ class TestShowRebaseSubmenuRefactored:
         )
         assert result == ""
         mock_print.assert_any_call("gum not found. Available container URLs:")
+
+
+class TestParseDeployments:
+    """Unit tests for the parse_deployments function."""
+
+    def test_parse_deployments_success(self, mocker: MockerFixture):
+        """Test parse_deployments with valid rpm-ostree status output."""
+        # Mock the subprocess.run call to return a sample rpm-ostree status output
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = """State: idle
+AutomaticUpdates: disabled
+Deployments:
+● ostree-image-signed:docker://ghcr.io/wombatfromhell/bazzite-nix:latest (index: 0)
+                   Digest: sha256:988868293abee6a54d19f44f39ba5a3f49df6660fbe5dd15c0de55e896f4ba95
+                  Version: testing-43.20251028.9 (2025-10-29T06:23:42Z)
+                   Commit: 9c306edd76f3c37211ed170d54a48fb8dbdd32bf8eb830e24be4ac9664c7672f
+                   Staged: no
+                StateRoot: default
+
+  ostree-image-signed:docker://ghcr.io/wombatfromhell/bazzite-nix:latest (index: 1)
+                   Digest: sha256:34d5117ee908295efbd98724961aaf94183ce793d6e4d1a350d298db7e9262fa
+                  Version: testing-43.20251028.5 (2025-10-28T13:56:45Z)
+                   Commit: fee57d04705544e403e0b70ec76ffc6ac5d8b14fe617dff2311ba1160cef5ce7
+                StateRoot: default
+
+  ostree-image-signed:docker://ghcr.io/wombatfromhell/bazzite-nix:latest (index: 2)
+                   Digest: sha256:ff5b3052cf25c8d34e9e4cd7ecf60064c4a3c24525a45f84c4669dee931d22ca
+                  Version: testing-42.20251025 (2025-10-27T06:25:18Z)
+                   Commit: 3a47687e364dee6dc21de6463b130a72293ea95e3e363c8cd2b1a0d421d06ffc
+                StateRoot: default
+                   Pinned: yes"""
+
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
+
+        from urh import parse_deployments
+
+        deployments = parse_deployments()
+
+        assert len(deployments) == 3
+
+        # Check first deployment (current and not pinned)
+        assert deployments[0]["index"] == 0
+        assert (
+            deployments[0]["version"] == "testing-43.20251028.9 (2025-10-29T06:23:42Z)"
+        )
+        assert not deployments[0]["pinned"]
+        assert deployments[0]["current"]
+
+        # Check second deployment (not pinned)
+        assert deployments[1]["index"] == 1
+        assert (
+            deployments[1]["version"] == "testing-43.20251028.5 (2025-10-28T13:56:45Z)"
+        )
+        assert not deployments[1]["pinned"]
+        assert not deployments[1]["current"]
+
+        # Check third deployment (pinned)
+        assert deployments[2]["index"] == 2
+        assert deployments[2]["version"] == "testing-42.20251025 (2025-10-27T06:25:18Z)"
+        assert deployments[2]["pinned"]
+        assert not deployments[2]["current"]
+
+    def test_parse_deployments_error(self, mocker: MockerFixture):
+        """Test parse_deployments handles command execution failure."""
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1
+        mocker.patch("urh.subprocess.run", return_value=mock_result)
+
+        from urh import parse_deployments
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+
+    def test_parse_deployments_exception(self, mocker: MockerFixture):
+        """Test parse_deployments handles exceptions."""
+        mocker.patch("urh.subprocess.run", side_effect=Exception("Test error"))
+
+        from urh import parse_deployments
+
+        deployments = parse_deployments()
+
+        assert deployments == []
+
+
+class TestShowDeploymentSubmenu:
+    """Unit tests for the show_deployment_submenu function."""
+
+    def test_show_deployment_submenu_tty_with_selection(self, mocker: MockerFixture):
+        """Test show_deployment_submenu when running in TTY with a selection."""
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock deployments to return
+        mock_parse_deployments = mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+                {
+                    "index": 1,
+                    "version": "testing-43.20251028.5 (2025-10-28T13:56:45Z)",
+                    "pinned": True,
+                },
+            ],
+        )
+
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = (
+            "testing-43.20251028.5 (2025-10-28T13:56:45Z) [Pinned: Yes]"
+        )
+        mock_subprocess_run.return_value = mock_result
+
+        from urh import show_deployment_submenu
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty, subprocess_run_func=mock_subprocess_run
+        )
+
+        assert result == 1  # index 1 corresponds to the selected version
+        mock_parse_deployments.assert_called_once()
+
+    def test_show_deployment_submenu_tty_no_selection(self, mocker: MockerFixture):
+        """Test show_deployment_submenu when running in TTY with no selection."""
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock deployments to return
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+            ],
+        )
+
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1  # No selection made
+        mock_result.stdout = ""
+        mock_subprocess_run.return_value = mock_result
+        mock_print = mocker.Mock()
+
+        from urh import show_deployment_submenu
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+
+        assert result is None
+        mock_print.assert_called_with("No option selected.")
+
+    def test_show_deployment_submenu_non_tty(self, mocker: MockerFixture):
+        """Test show_deployment_submenu when not running in TTY context."""
+        mock_is_tty = mocker.Mock(return_value=False)
+
+        # Mock deployments to return
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+            ],
+        )
+        mock_print = mocker.Mock()
+
+        from urh import show_deployment_submenu
+
+        result = show_deployment_submenu(is_tty_func=mock_is_tty, print_func=mock_print)
+
+        assert result is None
+        mock_print.assert_any_call("Available deployments:")
+
+    def test_show_deployment_submenu_gum_not_found(self, mocker: MockerFixture):
+        """Test show_deployment_submenu when gum is not available."""
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock deployments to return
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+            ],
+        )
+        mock_subprocess_run = mocker.Mock(side_effect=FileNotFoundError)
+        mock_print = mocker.Mock()
+
+        from urh import show_deployment_submenu
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+
+        assert result is None
+        mock_print.assert_any_call("gum not found. Available deployments:")
+
+    def test_show_deployment_submenu_with_filter(self, mocker: MockerFixture):
+        """Test show_deployment_submenu with a filter function."""
+        mock_is_tty = mocker.Mock(return_value=True)
+
+        # Mock deployments to return (with both pinned and non-pinned)
+        mocker.patch(
+            "urh.parse_deployments",
+            return_value=[
+                {
+                    "index": 0,
+                    "version": "testing-43.20251028.9 (2025-10-29T06:23:42Z)",
+                    "pinned": False,
+                },
+                {
+                    "index": 1,
+                    "version": "testing-43.20251028.5 (2025-10-28T13:56:45Z)",
+                    "pinned": True,
+                },
+                {
+                    "index": 2,
+                    "version": "testing-42.20251025 (2025-10-27T06:25:18Z)",
+                    "pinned": False,
+                },
+            ],
+        )
+
+        # Filter function to only show pinned deployments
+        def pinned_filter(deployment):
+            return deployment["pinned"]
+
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = (
+            "testing-43.20251028.5 (2025-10-28T13:56:45Z) [Pinned: Yes]"
+        )
+        mock_subprocess_run.return_value = mock_result
+
+        from urh import show_deployment_submenu
+
+        result = show_deployment_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            filter_func=pinned_filter,
+        )
+
+        assert result == 1  # Should return index 1 (the pinned deployment)
+        # Verify that subprocess was called with the pinned option only
+        call_args = mock_subprocess_run.call_args
+        if call_args:
+            args, kwargs = call_args
+            cmd = args[0] if args else []
+            # Check that only the pinned deployment option is present in the command
+            assert "testing-43.20251028.5 (2025-10-28T13:56:45Z) [Pinned: Yes]" in cmd
+            # The unpinned deployments should not be there
+            assert not any("testing-43.20251028.9" in str(arg) for arg in cmd)
+            assert not any("testing-42.20251025" in str(arg) for arg in cmd)
+
+
+class TestRmCommandWithSubmenu:
+    """Unit tests for the rm_command with submenu functionality."""
+
+    def test_rm_command_with_number(self, mocker: MockerFixture):
+        """Test rm_command with valid number."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import rm_command
+
+        rm_command(["3"])
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "cleanup", "-r", "3"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_rm_command_no_args_calls_submenu(self, mocker: MockerFixture):
+        """Test rm_command calls submenu when no args provided."""
+        # Mock the show_deployment_submenu function to avoid actual gum execution
+        mock_show_deployment_submenu = mocker.patch(
+            "urh.show_deployment_submenu", return_value=1
+        )
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import rm_command
+
+        rm_command([])
+
+        # Verify that submenu was called
+        mock_show_deployment_submenu.assert_called_once()
+        # And that the rm command was run with the selected index
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "cleanup", "-r", "1"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_rm_command_no_args_no_selection(self, mocker: MockerFixture):
+        """Test rm_command handles no selection from submenu."""
+        # Mock the show_deployment_submenu function to return None
+        mock_show_deployment_submenu = mocker.patch(
+            "urh.show_deployment_submenu", return_value=None
+        )
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import rm_command
+
+        rm_command([])
+
+        # Verify that submenu was called
+        mock_show_deployment_submenu.assert_called_once()
+        # Verify that run_command was never called (since no selection was made)
+        mock_run_command.assert_not_called()
+        # sys.exit should NOT be called when no selection is made
+        mock_sys_exit.assert_not_called()
+
+    def test_rm_command_invalid_number(self, mocker: MockerFixture):
+        """Test rm_command handles invalid number."""
+        mock_print = mocker.patch("urh.print")
+
+        from urh import rm_command
+
+        rm_command(["invalid"])
+        mock_print.assert_called_once_with("Invalid deployment number: invalid")
+
+
+class TestPinCommandWithSubmenu:
+    """Unit tests for the pin_command with submenu functionality."""
+
+    def test_pin_command_with_number(self, mocker: MockerFixture):
+        """Test pin_command with valid number."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import pin_command
+
+        pin_command(["1"])
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "admin", "pin", "1"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_pin_command_no_args_calls_submenu(self, mocker: MockerFixture):
+        """Test pin_command calls submenu when no args provided."""
+        # Mock the show_deployment_submenu function to avoid actual gum execution
+        # with filter for unpinned deployments
+        mock_show_deployment_submenu = mocker.patch(
+            "urh.show_deployment_submenu", return_value=2
+        )
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import pin_command
+
+        pin_command([])
+
+        # Verify that submenu was called with filter for unpinned deployments
+        # The call should have been made with a filter function
+        call_args = mock_show_deployment_submenu.call_args
+        assert call_args is not None
+        args, kwargs = call_args
+        # Check that filter_func was passed
+        assert "filter_func" in kwargs
+        # Apply the filter function to verify it filters for unpinned
+        filter_func = kwargs["filter_func"]
+        unpinned_deployment = {"pinned": False}
+        pinned_deployment = {"pinned": True}
+        assert filter_func(unpinned_deployment)
+        assert not filter_func(pinned_deployment)
+
+        # And that the pin command was run with the selected index
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "admin", "pin", "2"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_pin_command_no_args_no_selection(self, mocker: MockerFixture):
+        """Test pin_command handles no selection from submenu."""
+        # Mock the show_deployment_submenu function to return None
+        mock_show_deployment_submenu = mocker.patch(
+            "urh.show_deployment_submenu", return_value=None
+        )
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import pin_command
+
+        pin_command([])
+
+        # Verify that submenu was called
+        mock_show_deployment_submenu.assert_called_once()
+        # Verify that run_command was never called (since no selection was made)
+        mock_run_command.assert_not_called()
+        # sys.exit should NOT be called when no selection is made
+        mock_sys_exit.assert_not_called()
+
+    def test_pin_command_invalid_number(self, mocker: MockerFixture):
+        """Test pin_command handles invalid number."""
+        mock_print = mocker.patch("urh.print")
+
+        from urh import pin_command
+
+        pin_command(["invalid"])
+        mock_print.assert_called_once_with("Invalid deployment number: invalid")
+
+
+class TestUnpinCommandWithSubmenu:
+    """Unit tests for the unpin_command with submenu functionality."""
+
+    def test_unpin_command_with_number(self, mocker: MockerFixture):
+        """Test unpin_command with valid number."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import unpin_command
+
+        unpin_command(["2"])
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "admin", "pin", "-u", "2"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_unpin_command_no_args_calls_submenu(self, mocker: MockerFixture):
+        """Test unpin_command calls submenu when no args provided."""
+        # Mock the show_deployment_submenu function to avoid actual gum execution
+        # with filter for pinned deployments
+        mock_show_deployment_submenu = mocker.patch(
+            "urh.show_deployment_submenu", return_value=1
+        )
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import unpin_command
+
+        unpin_command([])
+
+        # Verify that submenu was called with filter for pinned deployments
+        call_args = mock_show_deployment_submenu.call_args
+        assert call_args is not None
+        args, kwargs = call_args
+        # Check that filter_func was passed
+        assert "filter_func" in kwargs
+        # Apply the filter function to verify it filters for pinned
+        filter_func = kwargs["filter_func"]
+        unpinned_deployment = {"pinned": False}
+        pinned_deployment = {"pinned": True}
+        assert filter_func(pinned_deployment)
+        assert not filter_func(unpinned_deployment)
+
+        # And that the unpin command was run with the selected index
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "admin", "pin", "-u", "1"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_unpin_command_no_args_no_selection(self, mocker: MockerFixture):
+        """Test unpin_command handles no selection from submenu."""
+        # Mock the show_deployment_submenu function to return None
+        mock_show_deployment_submenu = mocker.patch(
+            "urh.show_deployment_submenu", return_value=None
+        )
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("urh.sys.exit")
+
+        from urh import unpin_command
+
+        unpin_command([])
+
+        # Verify that submenu was called
+        mock_show_deployment_submenu.assert_called_once()
+        # Verify that run_command was never called (since no selection was made)
+        mock_run_command.assert_not_called()
+        # sys.exit should NOT be called when no selection is made
+        mock_sys_exit.assert_not_called()
+
+    def test_unpin_command_invalid_number(self, mocker: MockerFixture):
+        """Test unpin_command handles invalid number."""
+        mock_print = mocker.patch("urh.print")
+
+        from urh import unpin_command
+
+        unpin_command(["invalid"])
+        mock_print.assert_called_once_with("Invalid deployment number: invalid")

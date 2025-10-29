@@ -39,9 +39,9 @@ This utility is designed to:
 - **Usage**: Users can navigate with arrow keys or select directly by number; press ESC to cancel
 
 #### `check`
-- **Wraps**: `sudo rpm-ostree upgrade --check`
+- **Wraps**: `rpm-ostree upgrade --check`
 - **Function**: Check for available updates without applying them
-- **Requires sudo**: Yes
+- **Requires sudo**: No
 
 #### `upgrade`
 - **Wraps**: `sudo rpm-ostree upgrade`
@@ -64,16 +64,19 @@ This utility is designed to:
 - **Wraps**: `sudo ostree admin pin <num>`
 - **Function**: Pin a specific deployment by number to prevent automatic cleanup
 - **Requires sudo**: Yes
+- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information (excluding already pinned deployments) that allows users to select which deployment to pin. The selection maps to the appropriate deployment index.
 
 #### `unpin <num>`
 - **Wraps**: `sudo ostree admin pin -u <num>`
 - **Function**: Unpin a specific deployment by number
 - **Requires sudo**: Yes
+- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information (only showing already pinned deployments) that allows users to select which deployment to unpin. The selection maps to the appropriate deployment index.
 
 #### `rm <num>`
 - **Wraps**: `sudo ostree cleanup -r <num>`
 - **Function**: Remove a specific deployment by number
 - **Requires sudo**: Yes
+- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information that allows users to select which deployment to remove. The selection maps to the appropriate deployment index.
 
 ### Menu System
 
