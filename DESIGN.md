@@ -138,6 +138,33 @@ The project follows a comprehensive testing strategy with three distinct test ca
 - Simulate real usage scenarios from user input to function calls
 - Located in `tests/test_e2e.py`
 
+### Shared Test Configuration (`conftest.py`)
+
+To reduce code duplication and improve maintainability, the project uses a `conftest.py` file in the tests directory that contains:
+
+- Common path setup for all test files (sys.path manipulation)
+- Shared fixtures for common mocking patterns
+- Standardized test utilities and helper functions
+- Dependency injection fixtures for testing functions with external dependencies
+
+#### Conftest.py Structure
+
+The `conftest.py` file includes the following shared fixtures:
+
+- `mock_is_tty_true` and `mock_is_tty_false`: Pre-configured fixtures for mocking TTY detection
+- `mock_subprocess_result`: Factory fixture for creating mock subprocess results
+- `mock_subprocess_run_success` and `mock_subprocess_run_failure`: Standardized subprocess run mocks
+- `mock_print`: Pre-configured mock for the print function
+
+Each test file still needs to import the necessary functions from the urh module, but they benefit from:
+- Centralized path setup (no need to repeat sys.path manipulation in each file)
+- Access to standardized fixtures defined in conftest.py
+- Cleaner test code with no duplicated fixture definitions
+
+#### Conftest.py Usage Requirement
+
+When modifying or adding tests to this project, developers must leverage the shared fixtures in `tests/conftest.py` whenever appropriate. Any new common fixtures that may benefit multiple test files should be added to `conftest.py` rather than being defined in individual test modules to maintain consistency and reduce code duplication.
+
 ### Test Parametrization
 
 When writing tests that cover similar functionality with different input values, prefer pytest's parametrization feature rather than creating multiple discrete test functions. This approach reduces code duplication and makes test maintenance easier. Only create separate tests when the code concerns are fundamentally different.
