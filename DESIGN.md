@@ -86,6 +86,14 @@ When no command is provided, the utility uses gum to display an interactive menu
 
 For commands that require submenu functionality (like `rebase`), the utility uses gum with proper subprocess configuration to ensure the interactive UI is displayed correctly. The subprocess must capture stdout to receive user selections, but stderr must not be captured to allow the gum interface to be visible in TTY contexts.
 
+### Menu Navigation Behavior
+
+When using interactive submenus, the utility supports intuitive navigation:
+- Pressing ESC in any submenu will return the user to the main menu
+- When ESC is pressed in a submenu (gum choose), a special `MenuExitException` is raised
+- This exception is caught by the main menu loop, which then redisplays the main menu
+- This provides a consistent user experience where ESC acts as a "back" function
+
 ## Implementation Details
 
 ### Command Execution

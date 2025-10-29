@@ -105,21 +105,21 @@ class TestShowRebaseSubmenu:
     @pytest.mark.parametrize(
         "selected_option,expected_url",
         [
-            ("1: ghcr.io/ublue-os/bazzite:stable", "ghcr.io/ublue-os/bazzite:stable"),
-            ("2: ghcr.io/ublue-os/bazzite:testing", "ghcr.io/ublue-os/bazzite:testing"),
+            ("ghcr.io/ublue-os/bazzite:stable", "ghcr.io/ublue-os/bazzite:stable"),
+            ("ghcr.io/ublue-os/bazzite:testing", "ghcr.io/ublue-os/bazzite:testing"),
             (
-                "3: ghcr.io/ublue-os/bazzite:unstable",
+                "ghcr.io/ublue-os/bazzite:unstable",
                 "ghcr.io/ublue-os/bazzite:unstable",
             ),
             (
-                "*4: ghcr.io/wombatfromhell/bazzite-nix:testing",
+                "ghcr.io/wombatfromhell/bazzite-nix:testing",
                 "ghcr.io/wombatfromhell/bazzite-nix:testing",
             ),
             (
-                "5: ghcr.io/wombatfromhell/bazzite-nix:stable",
+                "ghcr.io/wombatfromhell/bazzite-nix:stable",
                 "ghcr.io/wombatfromhell/bazzite-nix:stable",
             ),
-            ("6: ghcr.io/astrovm/amyos:latest", "ghcr.io/astrovm/amyos:latest"),
+            ("ghcr.io/astrovm/amyos:latest", "ghcr.io/astrovm/amyos:latest"),
         ],
     )
     def test_show_rebase_submenu_with_selection(

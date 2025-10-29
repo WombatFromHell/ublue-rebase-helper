@@ -74,4 +74,3 @@ When writing tests for this project, AI agents must:
 - Create end-to-end tests that simulate complete user workflows
 - Favor pytest's parametrization (`@pytest.mark.parametrize`) for tests that cover similar functionality with different input values, rather than splitting them into multiple discrete tests unless their code concerns are different
 - When test functions are similarly named yet test different code concerns, change each test function name to concisely reflect what the test's specific code concern is to prevent tests from shadowing each other
-
