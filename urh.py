@@ -83,6 +83,9 @@ def run_gum_submenu(
                         print_func(no_selection_message)
                         return None
                     else:
+                        # avoid printing fallback message on ESC
+                        sys.stdout.write("\033[F\033[K")
+                        sys.stdout.flush()
                         # In normal mode, raise exception to return to main menu
                         raise MenuExitException()
                 # For other errors, return None
