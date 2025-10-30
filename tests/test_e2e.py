@@ -25,6 +25,7 @@ class TestMainE2E:
             ("pin", "pin_command", ["1"]),
             ("unpin", "unpin_command", ["2"]),
             ("rm", "rm_command", ["3"]),
+            ("remote-ls", "remote_ls_command", ["ghcr.io/test/repo:latest"]),
         ],
     )
     def test_main_calls_correct_command(
@@ -143,3 +144,64 @@ class TestMainE2EErrorScenarios:
 
         # Should call help command with empty arguments
         mock_help_command.assert_called_once_with([])
+
+    def test_main_remote_ls_command_with_url(self, mocker: MockerFixture):
+        """Test main with remote-ls command and specific URL."""
+        # Mock sys.argv to simulate the remote-ls command with URL
+        mocker.patch.object(
+            sys, "argv", ["urh.py", "remote-ls", "ghcr.io/ublue-os/bazzite:latest"]
+        )
+
+        # Mock sys.exit so it doesn't actually exit
+        mocker.patch("urh.sys.exit")
+
+        # Mock the remote_ls_command to track if it's called
+        mock_remote_ls_command = mocker.patch("urh.remote_ls_command")
+
+        # Call main function
+        main()
+
+        # Verify that remote_ls_command was called with the right arguments
+        mock_remote_ls_command.assert_called_once_with(
+            ["ghcr.io/ublue-os/bazzite:latest"]
+        )
+
+    def test_main_remote_ls_command_with_different_registry(
+        self, mocker: MockerFixture
+    ):
+        """Test main with remote-ls command and different registry."""
+        # Mock sys.argv to simulate the remote-ls command with a different registry
+        mocker.patch.object(
+            sys, "argv", ["urh.py", "remote-ls", "docker.io/library/ubuntu:20.04"]
+        )
+
+        # Mock sys.exit so it doesn't actually exit
+        mocker.patch("urh.sys.exit")
+
+        # Mock the remote_ls_command to track if it's called
+        mock_remote_ls_command = mocker.patch("urh.remote_ls_command")
+
+        # Call main function
+        main()
+
+        # Verify that remote_ls_command was called with the right arguments
+        mock_remote_ls_command.assert_called_once_with(
+            ["docker.io/library/ubuntu:20.04"]
+        )
+
+    def test_main_remote_ls_command_no_args(self, mocker: MockerFixture):
+        """Test main with remote-ls command but no arguments (should show submenu)."""
+        # Mock sys.argv to simulate the remote-ls command with no arguments
+        mocker.patch.object(sys, "argv", ["urh.py", "remote-ls"])
+
+        # Mock sys.exit so it doesn't actually exit
+        mocker.patch("urh.sys.exit")
+
+        # Mock the remote_ls_command to track if it's called
+        mock_remote_ls_command = mocker.patch("urh.remote_ls_command")
+
+        # Call main function
+        main()
+
+        # Verify that remote_ls_command was called with no arguments (to show submenu)
+        mock_remote_ls_command.assert_called_once_with([])

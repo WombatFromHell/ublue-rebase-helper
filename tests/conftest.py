@@ -7,6 +7,8 @@ import pytest
 # Add the parent directory to sys.path so we can import urh
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from urh import OCIClient
+
 
 # Common fixtures for dependency injection tests
 @pytest.fixture
@@ -52,3 +54,11 @@ def mock_subprocess_run_failure(mocker, mock_subprocess_result):
 def mock_print(mocker):
     """Fixture that mocks the print function."""
     return mocker.Mock()
+
+
+@pytest.fixture
+def mock_client() -> OCIClient:
+    """Provides a OCIClient instance for testing."""
+    repo = "test/test-repo"
+    instance = OCIClient(repo, cache_path="/tmp/gcr_token_test_test-repo")
+    return instance

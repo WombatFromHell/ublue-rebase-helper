@@ -38,6 +38,12 @@ This utility is designed to:
   - `6: ghcr.io/astrovm/amyos:latest`
 - **Usage**: Users can navigate with arrow keys or select directly by number; press ESC to cancel
 
+#### `remote-ls <url>`
+- **Function**: List available tags for a container image from a remote registry
+- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `GCRClient.get_tags()` to fetch tags from the public `tags/list` endpoint, with tags filtered to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags.
+- **Requires sudo**: No
+- **Interactive submenu**: When no `<url>` is specified, uses `show_remote_ls_submenu()` to display a submenu of common container URLs for tag listing, similar to the rebase command options
+
 #### `check`
 - **Wraps**: `rpm-ostree upgrade --check`
 - **Function**: Check for available updates without applying them

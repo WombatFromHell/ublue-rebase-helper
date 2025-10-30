@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from urh import (
     show_command_menu,
     show_rebase_submenu,
+    show_remote_ls_submenu,
     show_deployment_submenu,
 )
 
@@ -29,7 +30,6 @@ class TestShowCommandMenu:
             ("pin - Pin a deployment", "pin"),
             ("unpin - Unpin a deployment", "unpin"),
             ("rm - Remove a deployment", "rm"),
-            ("help - Show this help message", "help"),
         ],
     )
     def test_show_command_menu_with_selection(
@@ -166,6 +166,82 @@ class TestShowRebaseSubmenu:
         mock_print = mocker.Mock()
 
         result = show_rebase_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+        assert result is None
+        # Check that print was called to show available commands
+        assert mock_print.called
+
+
+class TestShowRemoteLsSubmenuIntegration:
+    """Integration tests for the show_remote_ls_submenu function."""
+
+    @pytest.mark.parametrize(
+        "selected_option,expected_url",
+        [
+            ("ghcr.io/ublue-os/bazzite:stable", "ghcr.io/ublue-os/bazzite:stable"),
+            ("ghcr.io/ublue-os/bazzite:testing", "ghcr.io/ublue-os/bazzite:testing"),
+            (
+                "ghcr.io/ublue-os/bazzite:unstable",
+                "ghcr.io/ublue-os/bazzite:unstable",
+            ),
+            (
+                "ghcr.io/wombatfromhell/bazzite-nix:testing",
+                "ghcr.io/wombatfromhell/bazzite-nix:testing",
+            ),
+            (
+                "ghcr.io/wombatfromhell/bazzite-nix:stable",
+                "ghcr.io/wombatfromhell/bazzite-nix:stable",
+            ),
+            ("ghcr.io/astrovm/amyos:latest", "ghcr.io/astrovm/amyos:latest"),
+        ],
+    )
+    def test_show_remote_ls_submenu_with_selection(
+        self, mocker: MockerFixture, selected_option: str, expected_url: str
+    ):
+        """Test show_remote_ls_submenu when different container URLs are selected."""
+        # Use dependency injection for testing
+        mock_is_tty = mocker.Mock(return_value=True)
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = selected_option
+        mock_subprocess_run.return_value = mock_result
+
+        result = show_remote_ls_submenu(
+            is_tty_func=mock_is_tty, subprocess_run_func=mock_subprocess_run
+        )
+        assert result == expected_url
+
+    def test_show_remote_ls_submenu_no_selection(self, mocker: MockerFixture):
+        """Test show_remote_ls_submenu when no option is selected."""
+        # Use dependency injection for testing
+        mock_is_tty = mocker.Mock(return_value=True)
+        mock_subprocess_run = mocker.Mock()
+        mock_result = mocker.Mock()
+        mock_result.returncode = 1  # gum returns 1 when no selection made
+        mock_result.stdout = ""
+        mock_subprocess_run.return_value = mock_result
+        mock_print = mocker.Mock()
+
+        result = show_remote_ls_submenu(
+            is_tty_func=mock_is_tty,
+            subprocess_run_func=mock_subprocess_run,
+            print_func=mock_print,
+        )
+        assert result is None
+        mock_print.assert_called_with("No option selected.")
+
+    def test_show_remote_ls_submenu_gum_not_found(self, mocker: MockerFixture):
+        """Test show_remote_ls_submenu when gum is not found."""
+        # Use dependency injection for testing
+        mock_is_tty = mocker.Mock(return_value=True)
+        mock_subprocess_run = mocker.Mock(side_effect=FileNotFoundError)
+        mock_print = mocker.Mock()
+
+        result = show_remote_ls_submenu(
             is_tty_func=mock_is_tty,
             subprocess_run_func=mock_subprocess_run,
             print_func=mock_print,
