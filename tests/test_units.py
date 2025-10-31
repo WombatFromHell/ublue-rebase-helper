@@ -2250,12 +2250,18 @@ class TestRemoteLsCommand:
         """Test that remote_ls_command applies context-aware sorting based on URL tag."""
         # Mock OCIClient and its methods - we need to mock get_raw_tags for context cases
         mock_client = mocker.Mock()
+        mock_filter_rules = mocker.Mock()
+        mock_client.filter_rules = mock_filter_rules  # Set up the filter_rules property
         mocker.patch("urh.OCIClient", return_value=mock_client)
 
         # For URLs with testing/stable context, the code should call get_raw_tags
         # For other URLs, it should call fetch_repository_tags
         if expected_context:
             mock_client.get_raw_tags.return_value = {"tags": raw_tags}
+            # Configure the mock filter rules to return context-aware filtered tags
+            mock_filter_rules.context_aware_filter_and_sort.return_value = (
+                expected_sorted_tags
+            )
             mock_client.fetch_repository_tags.return_value = {
                 "tags": expected_sorted_tags
             }  # fallback
@@ -2352,8 +2358,20 @@ class TestRemoteLsCommand:
         ]
 
         mock_client = mocker.Mock()
+        mock_filter_rules = mocker.Mock()
+        mock_client.filter_rules = mock_filter_rules  # Set up the filter_rules property
         mocker.patch("urh.OCIClient", return_value=mock_client)
         mock_client.get_raw_tags.return_value = {"tags": raw_tags_with_invalid}
+        # Configure the mock filter rules to simulate context-aware filtering
+        # This should filter invalid tags and prioritize testing-prefixed tags
+        filtered_result = [
+            tag
+            for tag in raw_tags_with_invalid
+            if tag not in ["sha256:abc123def456", "latest", "testing", "<abc123def456>"]
+        ]
+        # In testing context, should prioritize testing-prefixed tags
+        filtered_result = [tag for tag in filtered_result if tag.startswith("testing-")]
+        mock_filter_rules.context_aware_filter_and_sort.return_value = filtered_result
 
         # Capture print calls
         captured_outputs = []
@@ -2426,8 +2444,18 @@ class TestRemoteLsCommand:
         ]
 
         mock_client = mocker.Mock()
+        mock_filter_rules = mocker.Mock()
+        mock_client.filter_rules = mock_filter_rules  # Set up the filter_rules property
         mocker.patch("urh.OCIClient", return_value=mock_client)
         mock_client.get_raw_tags.return_value = {"tags": raw_tags}
+        # Configure the mock filter rules to simulate context-aware filtering for unstable context
+        # This should filter out the 'unstable' alias but keep 'unstable-' prefixed tags
+        filtered_result = [tag for tag in raw_tags if tag != "unstable"]
+        # In unstable context, prioritize unstable-prefixed tags
+        filtered_result = [
+            tag for tag in filtered_result if tag.startswith("unstable-")
+        ]
+        mock_filter_rules.context_aware_filter_and_sort.return_value = filtered_result
 
         # Capture print calls
         captured_outputs = []
@@ -2699,9 +2727,13 @@ class TestRemoteLsCommand:
 
         # Mock OCIClient and its methods
         mock_client = mocker.Mock()
+        mock_filter_rules = mocker.Mock()
+        mock_client.filter_rules = mock_filter_rules  # Set up the filter_rules property
         mock_client_class = mocker.patch("urh.OCIClient", return_value=mock_client)
-        # Since :testing IS a special context, get_raw_tags should be called, then _context_aware_filter_and_sort
+        # Since :testing IS a special context, get_raw_tags should be called, then context_aware_filter_and_sort
         mock_client.get_raw_tags.return_value = {"tags": many_tags}
+        # Configure the mock filter rules to return limited tags (first 30 as expected by test)
+        mock_filter_rules.context_aware_filter_and_sort.return_value = many_tags[:30]
 
         # Capture print calls to verify only 30 tags are printed
         print_calls = []

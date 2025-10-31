@@ -6,6 +6,8 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 # Define type aliases for our sorting keys
@@ -16,6 +18,232 @@ AlphaVersionKey = Tuple[
     int, Tuple[int, ...]
 ]  # (0, tuple of char codes) or (context_priority, tuple of char codes)
 VersionSortKey = Union[DateVersionKey, AlphaVersionKey]
+
+
+def get_config_path() -> Path:
+    """
+    Get the path to the urh configuration file.
+
+    Returns:
+        Path to the configuration file.
+    """
+    # Check XDG_CONFIG_HOME first, fallback to ~/.config
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        config_file = Path(xdg_config_home) / "urh.toml"
+    else:
+        config_file = Path.home() / ".config" / "urh.toml"
+
+    # Make sure the parent directory exists
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    return config_file
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    Load the configuration from TOML file.
+
+    Returns:
+        A dictionary containing the configuration.
+    """
+    config_path = get_config_path()
+
+    if not config_path.exists():
+        # Create default config if it doesn't exist
+        create_default_config()
+        print(f"Created default config file at {config_path}")
+
+    try:
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        print(f"Error parsing TOML config file: {e}")
+        print("Using default configuration instead.")
+        return get_default_config()
+    except Exception as e:
+        print(f"Error reading config file: {e}")
+        print("Using default configuration instead.")
+        return get_default_config()
+
+
+def create_default_config():
+    """
+    Create a default configuration file with default filter rules and container URLs.
+    """
+    config_path = get_config_path()
+
+    default_config = get_default_config()
+
+    # Convert to TOML format and write to file
+    with open(config_path, "w") as f:
+        f.write("# ublue-rebase-helper (urh) configuration file\n")
+        f.write(f"# Default location: {config_path}\n")
+        f.write("#\n")
+        f.write("# For documentation about the format, see DESIGN.md\n")
+        f.write("\n")
+
+        # Write repositories section
+        f.write('[repositories."ublue-os/bazzite"]\n')
+        f.write("include_sha256_tags = false\n")
+        f.write("filter_patterns = [\n")
+        for pattern in default_config["repositories"]["ublue-os/bazzite"][
+            "filter_patterns"
+        ]:
+            # Escape backslashes for TOML
+            escaped_pattern = pattern.replace("\\", "\\\\")
+            f.write(f'    "{escaped_pattern}",\n')
+        f.write("]\n")
+        f.write("ignore_tags = [\n")
+        for tag in default_config["repositories"]["ublue-os/bazzite"]["ignore_tags"]:
+            f.write(f'    "{tag}",\n')
+        f.write("]\n")
+        f.write("\n")
+
+        f.write('[repositories."wombatfromhell/bazzite-nix"]\n')
+        f.write("include_sha256_tags = false\n")
+        f.write("filter_patterns = [\n")
+        for pattern in default_config["repositories"]["wombatfromhell/bazzite-nix"][
+            "filter_patterns"
+        ]:
+            # Escape backslashes for TOML
+            escaped_pattern = pattern.replace("\\", "\\\\")
+            f.write(f'    "{escaped_pattern}",\n')
+        f.write("]\n")
+        f.write("ignore_tags = [\n")
+        for tag in default_config["repositories"]["wombatfromhell/bazzite-nix"][
+            "ignore_tags"
+        ]:
+            f.write(f'    "{tag}",\n')
+        f.write("]\n")
+        f.write("\n")
+
+        f.write('[repositories."astrovm/amyos"]\n')
+        f.write("include_sha256_tags = false\n")
+        f.write("filter_patterns = [\n")
+        for pattern in default_config["repositories"]["astrovm/amyos"][
+            "filter_patterns"
+        ]:
+            # Escape backslashes for TOML
+            escaped_pattern = pattern.replace("\\", "\\\\")
+            f.write(f'    "{escaped_pattern}",\n')
+        f.write("]\n")
+        f.write("ignore_tags = [\n")
+        for tag in default_config["repositories"]["astrovm/amyos"]["ignore_tags"]:
+            f.write(f'    "{tag}",\n')
+        f.write("]\n")
+        f.write("transform_patterns = [\n")
+        for transform in default_config["repositories"]["astrovm/amyos"][
+            "transform_patterns"
+        ]:
+            # Escape backslashes for TOML in both pattern and replacement
+            escaped_pattern = transform["pattern"].replace("\\", "\\\\")
+            escaped_replacement = transform["replacement"].replace("\\", "\\\\")
+            f.write(
+                f'    {{ pattern = "{escaped_pattern}", replacement = "{escaped_replacement}" }},\n'
+            )
+        f.write("]\n")
+        f.write("\n")
+
+        # Write container URLs section
+        f.write("[container_urls]\n")
+        f.write(f'default = "{default_config["container_urls"]["default"]}"\n')
+        f.write("options = [\n")
+        for url in default_config["container_urls"]["options"]:
+            f.write(f'    "{url}",\n')
+        f.write("]\n")
+        f.write("\n")
+
+        # Write settings section
+        f.write("[settings]\n")
+        f.write(
+            f"max_tags_display = {default_config['settings']['max_tags_display']}\n"
+        )
+        f.write(
+            f"debug_mode = {str(default_config['settings']['debug_mode']).lower()}\n"
+        )
+
+
+def get_default_config() -> Dict[str, Any]:
+    """
+    Get the default configuration.
+
+    Returns:
+        A dictionary containing the default configuration.
+    """
+    return {
+        "repositories": {
+            "ublue-os/bazzite": {
+                "include_sha256_tags": False,
+                "filter_patterns": [
+                    "^sha256-.*\\.sig$",  # signature tags
+                    "^sha256-.*",  # sha256- hash patterns
+                    "^sha256:.*",  # sha256: hash patterns
+                    "^[0-9a-fA-F]{40,64}$",  # 40-64 character hex hashes
+                    "^<.*>$",  # <hex-hash> patterns
+                    "^(latest|testing|stable|unstable)$",  # exact tag aliases
+                    "^testing\\..*",  # testing.* patterns (except latest.YYYYMMDD)
+                    "^stable\\..*",  # stable.* patterns
+                    "^unstable\\..*",  # unstable.* patterns
+                    "^\\d{1,2}$",  # standalone major versions (1-2 digits)
+                    "^(latest|testing|stable|unstable)-\\d{1,2}$",  # major version aliases
+                    "^\\d{1,2}-(testing|stable|unstable)$",  # version suffix patterns
+                ],
+                "ignore_tags": ["latest", "testing", "stable", "unstable"],
+            },
+            "wombatfromhell/bazzite-nix": {
+                "include_sha256_tags": False,
+                "filter_patterns": [
+                    "^sha256-.*\\.sig$",
+                    "^sha256-.*",
+                    "^sha256:.*",
+                    "^[0-9a-fA-F]{40,64}$",  # 40-64 character hex hashes
+                    "^<.*>$",
+                    "^(latest|testing|stable|unstable)$",
+                    "^testing\\..*",
+                    "^stable\\..*",
+                    "^unstable\\..*",
+                    "^\\d{1,2}$",
+                    "^(latest|testing|stable|unstable)-\\d{1,2}$",
+                    "^\\d{1,2}-(testing|stable|unstable)$",
+                ],
+                "ignore_tags": ["latest", "testing", "stable", "unstable"],
+            },
+            "astrovm/amyos": {
+                "include_sha256_tags": False,
+                "filter_patterns": [
+                    "^sha256-.*\\.sig$",
+                    "^<.*>$",
+                    "^(testing|stable|unstable)$",  # exact tag aliases (NOT latest)
+                    "^testing\\..*",
+                    "^stable\\..*",
+                    "^unstable\\..*",
+                    "^\\d{1,2}$",  # standalone major versions
+                    "^(latest|testing|stable|unstable)-\\d{1,2}$",  # major version aliases
+                    "^\\d{1,2}-(testing|stable|unstable)$",  # version suffix patterns
+                ],
+                "ignore_tags": ["testing", "stable", "unstable"],
+                "transform_patterns": [
+                    {
+                        "pattern": "^latest\\.(\\d{8})$",
+                        "replacement": "\\1",
+                    }  # transform latest.YYYYMMDD to YYYYMMDD
+                ],
+                "latest_dot_handling": "transform_dates_only",  # For amyos: transform date-like latest.YYYYMMDD, filter others
+            },
+        },
+        "container_urls": {
+            "default": "ghcr.io/wombatfromhell/bazzite-nix:testing",
+            "options": [
+                "ghcr.io/wombatfromhell/bazzite-nix:testing",
+                "ghcr.io/wombatfromhell/bazzite-nix:stable",
+                "ghcr.io/ublue-os/bazzite:stable",
+                "ghcr.io/ublue-os/bazzite:testing",
+                "ghcr.io/ublue-os/bazzite:unstable",
+                "ghcr.io/astrovm/amyos:latest",
+            ],
+        },
+        "settings": {"max_tags_display": 30, "debug_mode": False},
+    }
 
 
 class MenuExitException(Exception):
@@ -37,18 +265,32 @@ class OCIClient:
     and caches tokens to a temporary file.
     """
 
-    def __init__(self, repository: str, cache_path: Optional[str] = None):
+    def __init__(
+        self,
+        repository: str,
+        cache_path: Optional[str] = None,
+        filter_rules: Optional["TOMLFilterRules"] = None,
+        debug: bool = False,
+    ):
         """
         Initialize the client with a repository name.
 
         Args:
             repository: The repository name in format "owner/repo"
             cache_path: Optional cache path for testing purposes
+            filter_rules: Optional custom filter rules for this repository
+            debug: Enable debug output to see raw and processed tags
         """
         if not repository or "/" not in repository:
             raise ValueError("Repository must be in 'owner/repo' format.")
         self.repository = repository
         self._cache_path_override = cache_path
+        self.filter_rules = (
+            filter_rules
+            if filter_rules is not None
+            else get_filter_rules_for_repository(repository)
+        )
+        self.debug = debug
 
     def _get_cache_filepath(self) -> str:
         """
@@ -351,17 +593,15 @@ class OCIClient:
         Returns:
             True if the tag should be filtered out, False otherwise
         """
-        # Use the common filtering function directly
-        return _should_filter_tag_common(tag)
+        # Use the repository-specific filter rules
+        return self.filter_rules.should_filter_tag(tag)
 
     def _filter_and_sort_tags(
         self, tags_data: Optional[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
         """
         Filter out SHA256 tags and tag aliases (latest, testing, stable), then sort tags in descending order by version.
-        Tags following the format [<prefix>-]<YYYY><MM><DD>[.<SUBVER>] where prefix might be 'testing-' or 'stable-'
-        are sorted by date (newest first) with higher subversions taking precedence. Other formats maintain reverse
-        alphabetical sorting for backward compatibility.
+        Uses repository-specific filter rules to handle different tag formats appropriately.
 
         Args:
             tags_data: Dictionary containing tags data from the API
@@ -375,26 +615,35 @@ class OCIClient:
 
         tags: List[str] = tags_data["tags"]
 
-        # Filter tags using the dedicated filtering function
-        filtered_tags: List[str] = [
-            tag for tag in tags if not self._should_filter_tag(tag)
-        ]
+        if self.debug:
+            print(
+                f"DEBUG: Raw tags from API ({len(tags)} total): {tags[:20]}{'...' if len(tags) > 20 else ''}"
+            )
+            # Check specifically for latest.YYYYMMDD format tags
+            latest_format_tags = [
+                tag
+                for tag in tags
+                if tag.lower().startswith("latest.")
+                and len(tag) > 7
+                and tag[7:].isdigit()
+                and len(tag[7:]) >= 8
+            ]
+            if latest_format_tags:
+                print(
+                    f"DEBUG: Found latest.YYYYMMDD format tags: {latest_format_tags[:10]}"
+                )
 
-        # Sort tags by version in descending order (newest first)
-        # This uses the consolidated parsing function to handle the specific format
-        sorted_tags: List[str] = sorted(
-            filtered_tags,
-            key=lambda tag: _create_version_sort_key(
-                tag, include_context_priority=False
-            ),
-        )
+        # Use the repository-specific filter rules to process tags
+        processed_tags = self.filter_rules.filter_and_sort_tags(tags, limit=30)
 
-        # Limit to maximum 30 tags
-        limited_tags = sorted_tags[:30]
+        if self.debug:
+            print(
+                f"DEBUG: Processed tags: {processed_tags[:20]}{'...' if len(processed_tags) > 20 else ''}"
+            )
 
-        # Return a new dictionary with filtered, sorted, and limited tags
+        # Return a new dictionary with processed tags
         result: Dict[str, Any] = tags_data.copy()
-        result["tags"] = limited_tags
+        result["tags"] = processed_tags
         return result
 
     def fetch_repository_tags(self) -> Optional[Dict[str, Any]]:
@@ -427,6 +676,23 @@ class OCIClient:
             return None
 
         tags_data = self.get_all_tags(token)
+        return tags_data
+
+    def get_all_tags_raw(self) -> Optional[Dict[str, Any]]:
+        """
+        Get all tags from the repository without any processing by filter rules.
+        This bypasses the filter rules entirely and returns raw tag data.
+
+        Returns:
+            A dictionary containing the raw tags if successful, None otherwise.
+        """
+        token = self.get_token()
+        if token is None:
+            print("Could not obtain a token. Aborting.")
+            return None
+
+        tags_data = self.get_all_tags(token)
+        # Return the raw data without applying filter rules
         return tags_data
 
 
@@ -681,15 +947,19 @@ def get_commands_with_descriptions() -> List[str]:
 
 
 def get_container_options() -> List[str]:
-    """Get the list of container URL options (with our default first)."""
-    return [
-        "ghcr.io/wombatfromhell/bazzite-nix:testing",
-        "ghcr.io/wombatfromhell/bazzite-nix:stable",
-        "ghcr.io/ublue-os/bazzite:stable",
-        "ghcr.io/ublue-os/bazzite:testing",
-        "ghcr.io/ublue-os/bazzite:unstable",
-        "ghcr.io/astrovm/amyos:latest",
-    ]
+    """Get the list of container URL options from TOML configuration."""
+    config = load_config()
+    return config.get("container_urls", {}).get(
+        "options",
+        [
+            "ghcr.io/wombatfromhell/bazzite-nix:testing",
+            "ghcr.io/wombatfromhell/bazzite-nix:stable",
+            "ghcr.io/ublue-os/bazzite:stable",
+            "ghcr.io/ublue-os/bazzite:testing",
+            "ghcr.io/ublue-os/bazzite:unstable",
+            "ghcr.io/astrovm/amyos:latest",
+        ],
+    )
 
 
 def show_command_menu(
@@ -942,38 +1212,55 @@ def remote_ls_command(
             # Determine the tag context from the URL (e.g., "testing", "stable", "unstable", etc.)
             url_tag_context = extract_context_from_url(url)
 
-            # Create OCIClient instance
+            # Create OCIClient instance with appropriate filter rules
             client = OCIClient(repo_part)
 
-            # For backward compatibility with existing tests, call fetch_repository_tags
-            # But for context-aware behavior, we'll get raw tags and process them separately
             if url_tag_context:
                 # If there's a URL context (e.g. :testing or :stable), get raw tags and apply context-aware processing
+                # For some repositories, we still need to apply transformations even with context
                 tags_data = client.get_raw_tags()
+
+                if tags_data and "tags" in tags_data:
+                    tags = tags_data["tags"]
+                    if tags:
+                        print(f"Tags for {url}:")
+
+                        # Apply repository-specific transformations first, then context-aware filtering
+                        # This ensures that amyos 'latest.20251031' becomes '20251031' before context filtering
+                        transformed_tags = [
+                            client.filter_rules.transform_tag(tag) for tag in tags
+                        ]
+
+                        # Apply context-aware filtering and sorting based on URL tag context
+                        # Use the repository-specific filter rules from the client
+                        filtered_and_sorted_tags = (
+                            client.filter_rules.context_aware_filter_and_sort(
+                                transformed_tags, url_tag_context
+                            )
+                        )
+
+                        for tag in filtered_and_sorted_tags:
+                            print(f"  {tag}")
+                    else:
+                        print(f"No tags found for {url}")
+                else:
+                    print(f"Could not fetch tags for {url}")
             else:
-                # Otherwise, use the standard processed tags for backward compatibility
+                # Otherwise, use the standard processed tags with repository-specific rules
                 tags_data = client.fetch_repository_tags()
 
-            if tags_data and "tags" in tags_data:
-                tags = tags_data["tags"]
-                if tags:
-                    print(f"Tags for {url}:")
+                if tags_data and "tags" in tags_data:
+                    tags = tags_data["tags"]
+                    if tags:
+                        print(f"Tags for {url}:")
 
-                    # Apply context-aware filtering and sorting based on URL tag context if needed
-                    if url_tag_context:
-                        filtered_and_sorted_tags = _context_aware_filter_and_sort(
-                            tags, url_tag_context
-                        )
+                        # Use the already processed tags from repository-specific rules
+                        for tag in tags:
+                            print(f"  {tag}")
                     else:
-                        # Use the already processed tags (maintains backward compatibility)
-                        filtered_and_sorted_tags = tags
-
-                    for tag in filtered_and_sorted_tags:
-                        print(f"  {tag}")
+                        print(f"No tags found for {url}")
                 else:
-                    print(f"No tags found for {url}")
-            else:
-                print(f"Could not fetch tags for {url}")
+                    print(f"Could not fetch tags for {url}")
         except Exception as e:
             print(f"Error fetching tags for {url}: {e}")
 
@@ -993,117 +1280,315 @@ def remote_ls_command(
     sys.exit(0)
 
 
-def _should_filter_tag_common(tag: str) -> bool:
+class TOMLFilterRules:
     """
-    Common function to determine if a tag should be filtered out based on multiple criteria.
-    This is a standalone function that can be used by both OCIClient and context-aware filtering.
-
-    Args:
-        tag: The tag to evaluate
-
-    Returns:
-        True if the tag should be filtered out, False otherwise
+    Filter rules implementation that uses TOML configuration for repository-specific settings.
     """
-    tag_lower = tag.lower()
 
-    # Skip if tag starts with sha256 prefix (general pattern)
-    if tag_lower.startswith("sha256-") or tag_lower.startswith("sha256:"):
-        return True
+    def __init__(self, repository: str):
+        """
+        Initialize filter rules based on TOML configuration.
 
-    # Skip if tag looks like a hex hash (40-64 characters of hex)
-    if (
-        len(tag) >= 40
-        and len(tag) <= 64
-        and all(c in "0123456789abcdefABCDEF" for c in tag)
-    ):
-        return True
+        Args:
+            repository: The repository name to get rules for
+        """
+        self.config = load_config()
+        self.repository = repository
 
-    # Skip if tag looks like <hex-hash>
-    if tag.startswith("<") and tag.endswith(">"):
-        return True
+        # Get repository-specific settings, falling back to default if not found
+        repo_config = self.config.get("repositories", {}).get(repository, {})
 
-    # Skip tag aliases (both exact matches and those starting with the alias followed by a dot)
-    if tag_lower in ["latest", "testing", "stable", "unstable"]:
-        return True
-    if any(
-        tag_lower.startswith(alias + ".")
-        for alias in ["latest", "testing", "stable", "unstable"]
-    ):
-        return True
+        # If no specific configuration is found for this repository, fall back to a default repository configuration
+        if not repo_config and repository not in self.config.get("repositories", {}):
+            # For unknown repositories, use bazzite as a default since it has general-purpose rules
+            repo_config = self.config.get("repositories", {}).get(
+                "ublue-os/bazzite", {}
+            )
 
-    # Skip major version patterns like "42", "43", etc. (standalone major versions)
-    if tag_lower.isdigit() and len(tag_lower) <= 2:
-        return True
+        self.include_sha256_tags = repo_config.get("include_sha256_tags", False)
+        self.filter_patterns = repo_config.get("filter_patterns", [])
+        self.ignore_tags = repo_config.get("ignore_tags", [])
+        self.transform_patterns = repo_config.get("transform_patterns", [])
 
-    # Skip major version alias patterns like "unstable-43", "testing-42", "stable-43", etc.
-    # These are aliases for actual version tags like "unstable-43.20251030"
-    # But don't skip patterns like "unstable-43.20251030" (major version with date) or "unstable-20231001" (date format)
-    for alias in ["latest", "testing", "stable", "unstable"]:
-        if tag_lower.startswith(alias + "-"):
-            after_prefix = tag_lower[len(alias) + 1 :]
-            parts = after_prefix.split(".")
-            first_part = parts[0]
-            # Check if it's a simple number with no more parts after (like "43" from "unstable-43")
-            # Major versions are typically short numbers (1-2 digits) with no additional parts
-            if (
-                first_part.isdigit() and len(first_part) <= 2 and len(parts) == 1
-            ):  # Major version numbers are typically 1-2 digits with no additional parts
+        # Get global settings
+        self.max_tags_display = self.config.get("settings", {}).get(
+            "max_tags_display", 30
+        )
+
+    def should_filter_tag(self, tag: str) -> bool:
+        """
+        Determine if a tag should be filtered out based on TOML configuration.
+
+        Args:
+            tag: The tag to evaluate
+
+        Returns:
+            True if the tag should be filtered out, False otherwise
+        """
+        # Special handling for latest. tags (mimics original _should_filter_tag_common behavior):
+        # - Filter out "latest." (no suffix)
+        # - Filter out "latest.<non-date>" like "latest.1", "latest.something"
+        # - Keep "latest.<date>" like "latest.20251031" for transformation by repository-specific rules
+        if tag.lower().startswith("latest."):
+            suffix = tag.lower()[7:]  # Get part after "latest."
+            if not suffix:  # "latest." with no suffix
+                return True
+            # Check if suffix looks like a date (YYYYMMDD format) - don't filter these, they need transformation
+            if len(suffix) >= 8 and suffix.isdigit():
+                # This looks like a date in YYYYMMDD format, don't filter it - let repo-specific rules handle it
+                return False
+            else:
+                # This is not a date format, likely "latest.1", "latest.something", etc. - filter it out
                 return True
 
-    # Skip version suffix patterns like "42-testing", "42-stable", "42-unstable"
-    # These are aliases where a major version has a suffix
-    suffix_patterns = ["-testing", "-stable", "-unstable"]
-    for suffix in suffix_patterns:
-        if tag_lower.endswith(suffix):
-            prefix_part = tag_lower[: -len(suffix)]  # Remove the suffix
-            if prefix_part.isdigit() and len(prefix_part) <= 2:  # Major version number
+        # Check if tag is in ignore list
+        if tag.lower() in [t.lower() for t in self.ignore_tags]:
+            return True
+
+        # Check against filter patterns
+        for pattern in self.filter_patterns:
+            if re.match(pattern, tag.lower()):
                 return True
 
-    # Skip signature tags (common convention)
-    if tag.endswith(".sig"):
-        return True
+        # Always filter out signature tags (sha256-*.sig) unless specifically allowed
+        if tag.lower().endswith(".sig") and "sha256-" in tag.lower():
+            return True
 
-    return False
+        # Filter out 64-character SHA256 hash tags (unless override is enabled)
+        if not self.include_sha256_tags:
+            if len(tag) == 64 and all(c in "0123456789abcdefABCDEF" for c in tag):
+                return True
+
+        return False
+
+    def transform_tag(self, tag: str) -> str:
+        """
+        Transform a tag to its desired format based on TOML configuration.
+
+        Args:
+            tag: The original tag
+
+        Returns:
+            The transformed tag
+        """
+        # Apply transformation patterns from config
+        for transform in self.transform_patterns:
+            pattern = transform.get("pattern", "")
+            replacement = transform.get("replacement", "")
+
+            if pattern and replacement:
+                try:
+                    # Use re.sub to apply the transformation
+                    # The replacement string should be applied as-is to allow capture groups like $1
+                    transformed = re.sub(pattern, replacement, tag)
+                    if transformed != tag:  # Only return if transformation occurred
+                        return transformed
+                except re.error:
+                    # If the regex is invalid, skip this pattern
+                    continue
+
+        # Return the original tag if no transformations applied
+        return tag
+
+    def filter_and_sort_tags(
+        self, tags: List[str], limit: Optional[int] = None
+    ) -> List[str]:
+        """
+        Filter, transform, and sort the complete list of tags based on TOML configuration.
+
+        Args:
+            tags: List of tags to process
+            limit: Maximum number of tags to return (None to use configured default)
+
+        Returns:
+            List of processed tags
+        """
+        # Apply transformations first
+        transformed_tags = [self.transform_tag(tag) for tag in tags]
+
+        # Then filter tags
+        filtered_tags = [
+            tag for tag in transformed_tags if not self.should_filter_tag(tag)
+        ]
+
+        # Then sort tags using the existing sorting function
+        sorted_tags = sorted(
+            filtered_tags,
+            key=lambda t: _create_version_sort_key(t, include_context_priority=False),
+        )
+
+        # Use the specified limit or fall back to configured default
+        effective_limit = limit if limit is not None else self.max_tags_display
+        if effective_limit is not None:
+            return sorted_tags[:effective_limit]
+        return sorted_tags
+
+    def context_aware_filter_and_sort(
+        self,
+        tags: List[str],
+        url_context: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[str]:
+        """
+        Filter and sort tags based on the context from the URL, using repository-specific TOML rules.
+
+        Args:
+            tags: List of tags to filter and sort
+            url_context: The context from the URL (e.g., "testing", "stable", or None)
+            limit: Maximum number of tags to return (None to use configured default)
+
+        Returns:
+            Filtered, sorted, and limited list of tags
+        """
+        # Apply transformations first
+        transformed_tags = [self.transform_tag(tag) for tag in tags]
+
+        # Then filter tags using repository-specific rules
+        filtered_tags = [
+            tag for tag in transformed_tags if not self.should_filter_tag(tag)
+        ]
+
+        if url_context:
+            # If URL has a tag context (like :testing or :stable), only show tags with that prefix
+            context_filtered_tags = self._context_filter_tags(
+                filtered_tags, url_context
+            )
+
+            # Sort by context-aware sorting function
+            sorted_tags: List[str] = sorted(
+                context_filtered_tags,
+                key=lambda t: _create_version_sort_key(
+                    t, url_context, include_context_priority=True
+                ),
+            )
+        else:
+            # When no context specified, deduplicate by extracting version information
+            unique_tags = self._deduplicate_tags_by_version(filtered_tags)
+
+            # Use basic date-based sorting without preferencing prefixes
+            sorted_tags: List[str] = sorted(
+                unique_tags,
+                key=lambda t: _create_version_sort_key(
+                    t, include_context_priority=False
+                ),
+            )
+
+        # Use the specified limit or fall back to configured default
+        effective_limit = limit if limit is not None else self.max_tags_display
+        if effective_limit is not None:
+            return sorted_tags[:effective_limit]
+        return sorted_tags
+
+    def _context_filter_tags(self, tags: List[str], url_context: str) -> List[str]:
+        """
+        Filter tags to only include those with the matching context prefix.
+
+        Args:
+            tags: List of tags to filter
+            url_context: The context to filter by (e.g., "testing", "stable")
+
+        Returns:
+            List of tags that match the context
+        """
+        context_prefix = f"{url_context}-"
+        return [tag for tag in tags if tag.startswith(context_prefix)]
+
+    def _deduplicate_tags_by_version(self, tags: List[str]) -> List[str]:
+        """
+        Deduplicate tags by extracting version information to keep unique versions.
+
+        Args:
+            tags: List of tags to deduplicate
+
+        Returns:
+            List of deduplicated tags
+        """
+        # Create a dict to store the best tag for each unique version pattern
+        unique_version_tags: Dict[str, str] = {}
+
+        for tag in tags:
+            # Extract version information for deduplication
+            version_key = self._extract_version_key(tag)
+            if version_key not in unique_version_tags or self._should_replace_tag(
+                unique_version_tags[version_key], tag
+            ):
+                unique_version_tags[version_key] = tag
+
+        # Get the unique tags
+        return list(unique_version_tags.values())
+
+    def _extract_version_key(self, tag: str) -> str:
+        """
+        Extract a version key for deduplication purposes.
+        For tags like 'stable-43.20251028', '43.20251028', 'testing-43.20251028',
+        this returns a normalized version string to identify duplicates.
+        """
+        import re
+
+        # Remove prefix if present for version parsing
+        clean_tag = tag
+        if tag.startswith("testing-"):
+            clean_tag = tag[8:]  # Remove "testing-" prefix
+        elif tag.startswith("stable-"):
+            clean_tag = tag[7:]  # Remove "stable-" prefix
+        elif tag.startswith("unstable-"):
+            clean_tag = tag[9:]  # Remove "unstable-" prefix
+
+        # Try XX.YYYYMMDD[.SUBVER] format
+        match = re.match(r"^(\d+)\.(\d{8})(?:\.(\d+))?$", clean_tag)
+        if match:
+            version_series = match.group(1)
+            date_part = match.group(2)
+            subver_part = match.group(3) if match.group(3) else ""
+            return f"{version_series}.{date_part}.{subver_part}"
+
+        # Try YYYYMMDD[.SUBVER] format
+        match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
+        if match:
+            date_part = match.group(1)
+            subver_part = match.group(2) if match.group(2) else ""
+            return f"{date_part}.{subver_part}"
+
+        # For non-matching formats, return the tag itself as the key (lowercase for case-insensitive comparison)
+        return tag.lower()
+
+    def _should_replace_tag(self, existing_tag: str, new_tag: str) -> bool:
+        """
+        Determine if a new tag should replace an existing tag during deduplication.
+        When there are duplicates, prefer the prefixed version (stable-, testing-, unstable-)
+        over the unprefixed version with the same content.
+        """
+        # If the new tag has a prefix but the existing doesn't, prefer the new one
+        new_has_prefix = new_tag.startswith(("stable-", "testing-", "unstable-"))
+        existing_has_prefix = existing_tag.startswith(
+            ("stable-", "testing-", "unstable-")
+        )
+
+        if new_has_prefix and not existing_has_prefix:
+            return True
+        elif not new_has_prefix and existing_has_prefix:
+            return False
+        else:
+            # If both have prefixes or both don't, keep the existing one (arbitrary choice)
+            return False
 
 
-def _context_filter_tags(tags: List[str], url_context: str) -> List[str]:
+def get_filter_rules_for_repository(
+    repository: str, include_sha256_tags: bool = False
+) -> TOMLFilterRules:
     """
-    Filter tags to only include those with the matching context prefix.
+    Get the appropriate filter rules for a given repository from TOML configuration.
 
     Args:
-        tags: List of tags to filter
-        url_context: The context to filter by (e.g., "testing", "stable")
+        repository: The repository name (e.g., "astrovm/amyos")
+        include_sha256_tags: Whether to override the default filtering of SHA256 hash tags (deprecated)
 
     Returns:
-        List of tags that match the context
+        An instance of the TOMLFilterRules class
     """
-    context_prefix = f"{url_context}-"
-    return [tag for tag in tags if tag.startswith(context_prefix)]
-
-
-def _deduplicate_tags_by_version(tags: List[str]) -> List[str]:
-    """
-    Deduplicate tags by extracting version information to keep unique versions.
-
-    Args:
-        tags: List of tags to deduplicate
-
-    Returns:
-        List of deduplicated tags
-    """
-    # Create a dict to store the best tag for each unique version pattern
-    unique_version_tags: Dict[str, str] = {}
-
-    for tag in tags:
-        # Extract version information for deduplication
-        version_key = _extract_version_key(tag)
-        if version_key not in unique_version_tags or _should_replace_tag(
-            unique_version_tags[version_key], tag
-        ):
-            unique_version_tags[version_key] = tag
-
-    # Get the unique tags
-    return list(unique_version_tags.values())
+    # Return a TOMLFilterRules instance which will load the appropriate configuration
+    # The include_sha256_tags parameter is now handled through config
+    return TOMLFilterRules(repository)
 
 
 def _context_aware_filter_and_sort(
@@ -1111,6 +1596,7 @@ def _context_aware_filter_and_sort(
 ) -> List[str]:
     """
     Filter and sort tags based on the context from the URL, limiting to maximum 30 tags.
+    This function uses the default repository rules for filtering (for backward compatibility).
 
     Args:
         tags: List of tags to filter and sort
@@ -1119,35 +1605,14 @@ def _context_aware_filter_and_sort(
     Returns:
         Filtered, sorted, and limited (max 30) list of tags
     """
+    # Create a default TOMLFilterRules instance to handle the filtering
+    # Use a generic repository name since this is for backward compatibility
+    rules = TOMLFilterRules(
+        "ublue-os/bazzite"
+    )  # Use a default repository configuration
 
-    # First filter out invalid tags using the common filtering logic
-    filtered_tags: List[str] = [
-        tag for tag in tags if not _should_filter_tag_common(tag)
-    ]
-
-    if url_context:
-        # If URL has a tag context (like :testing or :stable), only show tags with that prefix
-        context_filtered_tags = _context_filter_tags(filtered_tags, url_context)
-
-        # Sort by context-aware sorting function
-        sorted_tags: List[str] = sorted(
-            context_filtered_tags,
-            key=lambda t: _create_version_sort_key(
-                t, url_context, include_context_priority=True
-            ),
-        )
-    else:
-        # When no context specified, deduplicate by extracting version information
-        unique_tags = _deduplicate_tags_by_version(filtered_tags)
-
-        # Use basic date-based sorting without preferencing prefixes
-        sorted_tags: List[str] = sorted(
-            unique_tags,
-            key=lambda t: _create_version_sort_key(t, include_context_priority=False),
-        )
-
-    # Limit to maximum 30 tags
-    return sorted_tags[:30]
+    # Use the new context-aware method from TOMLFilterRules
+    return rules.context_aware_filter_and_sort(tags, url_context, limit=30)
 
 
 def _extract_version_key(tag: str) -> str:

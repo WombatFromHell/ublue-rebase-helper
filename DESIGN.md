@@ -43,9 +43,9 @@ This utility is designed to:
 #### `remote-ls <url>`
 
 - **Function**: List available tags for a container image from a remote registry
-- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `OCIClient.get_all_tags()` to fetch tags from the public `tags/list` endpoint with pagination support by following Link headers. Tags are filtered to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags.
+- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `OCIClient.get_all_tags()` to fetch tags from the public `tags/list` endpoint with pagination support by following Link headers. Tags are filtered using rules defined in the TOML configuration file (`~/.config/urh/urh.toml`) to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags (configurable via TOML settings).
 - **Requires sudo**: No
-- **Interactive submenu**: When no `<url>` is specified, uses `show_remote_ls_submenu()` to display a submenu of common container URLs for tag listing, similar to the rebase command options
+- **Interactive submenu**: When no `<url>` is specified, uses `show_remote_ls_submenu()` to display a submenu of container URLs loaded from the TOML configuration file, similar to the rebase command options
 
 #### `check`
 
@@ -127,6 +127,42 @@ The utility includes a persistent header that displays current deployment inform
 - The header is displayed using the `persistent_header` parameter in the `run_gum_submenu()` function
 - All submenu functions now accept an optional `persistent_header` parameter to maintain consistency
 
+## Configuration System
+
+The ublue-rebase-helper uses a TOML-based configuration system for customizable filter rules and options.
+
+### Configuration File Location
+
+The configuration file is located at:
+
+- `$XDG_CONFIG_HOME/urh.toml` (if XDG_CONFIG_HOME is set)
+- `$HOME/.config/urh.toml` (fallback location)
+
+The application automatically creates a default configuration file if one doesn't exist.
+
+### Repository Filter Rules Configuration
+
+Repository-specific filter rules are defined in the `[repositories]` section of the TOML file. Each repository can have:
+
+- `include_sha256_tags`: Whether to include SHA256 hash tags (default: false)
+- `filter_patterns`: List of regex patterns for tags to be filtered out
+- `ignore_tags`: List of exact tag names to be filtered out
+- `transform_patterns`: List of pattern/replacement pairs for tag transformations (e.g., for astrovm/amyos)
+
+### Container URL Configuration
+
+The container URLs available in the rebase and remote-ls submenus are defined in the `[container_urls]` section:
+
+- `default`: The default container URL to use
+- `options`: List of available container URLs in the submenu
+
+### Settings Configuration
+
+Global settings are defined in the `[settings]` section:
+
+- `max_tags_display`: Maximum number of tags to display (default: 30)
+- `debug_mode`: Enable debug output (default: false)
+
 ## Implementation Details
 
 ### Command Execution
@@ -167,17 +203,6 @@ To reduce code duplication and improve maintainability, the codebase uses common
 - `CommandDefinition` - A data class that defines command properties and behavior, enabling centralized command registration and reducing duplication in command handling
 - `_create_version_sort_key()` - A consolidated function for tag version sorting that handles both basic and context-aware sorting, reducing duplication in OCIClient methods
 - `_parse_response_headers_and_body()` and `_extract_link_header()` - Utility functions in OCIClient to reduce duplication in HTTP response parsing
-- `get_command_registry()` - A centralized registry for command mappings to eliminate duplicate mappings
-- `execute_command()` - A unified function to execute commands with proper error handling
-- `parse_command_argument()` - A function to handle argument parsing with submenu support
-- `get_error_message()` - A function to generate appropriate error messages
-- `extract_repository_from_url()` and `extract_context_from_url()` - Pure functions for URL parsing
-- `_parse_xx_yyyymmdd_format()` and `_parse_yyyymmdd_format()` - Pure functions for version parsing
-- `_context_filter_tags()` and `_deduplicate_tags_by_version()` - Pure functions for tag processing
-- `get_rpm_ostree_status_output()` - A function to isolate command execution from parsing logic
-- `is_deployment_line()`, `extract_deployment_index()`, `parse_deployment_details()`, and other parsing helpers - Functions to break down the complex deployment parsing logic
-- `_handle_gum_no_selection()` - A dedicated function to handle gum no-selection cases
-- `_process_response()` and `_make_request_with_token()` - Functions that separate HTTP request logic in OCIClient
 
 ### Privilege Escalation
 
