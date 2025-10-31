@@ -1,7 +1,8 @@
 """Integration tests for ublue-rebase-helper (urh.py)."""
 
-import sys
 import os
+import sys
+
 import pytest
 from pytest_mock import MockerFixture
 
@@ -10,9 +11,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from urh import (
     show_command_menu,
+    show_deployment_submenu,
     show_rebase_submenu,
     show_remote_ls_submenu,
-    show_deployment_submenu,
 )
 
 

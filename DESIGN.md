@@ -147,7 +147,7 @@ Commands that modify the system state require elevated privileges using `sudo`. 
 
 The `OCIClient` class provides functionality for interacting with OCI Container Registries such as ghcr.io:
 
-- **Token Management**: Uses OAuth2 authentication with token caching to `/tmp/` using a repository-specific filename
+- **Token Management**: Uses OAuth2 authentication with token caching to `/tmp/` using a single shared filename (`/tmp/oci_ghcr_token`) for all GHCR requests
 - **Pagination Support**: Implements Link header following to retrieve all tags beyond the initial 200 limit by parsing Link headers like `Link: </v2/user/repo/tags/list?last=tag_value&n=200>; rel="next"` and continuing until no more next links are present
 - **Tag Processing**: Includes filtering, sorting, and deduplication logic for container image tags
 - **Error Handling**: Includes retry mechanisms for expired/invalid tokens

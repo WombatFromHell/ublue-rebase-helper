@@ -1,7 +1,8 @@
 """End-to-end tests for ublue-rebase-helper (urh.py)."""
 
-import sys
 import os
+import sys
+
 import pytest
 from pytest_mock import MockerFixture
 

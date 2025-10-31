@@ -2,11 +2,11 @@
 # pyright: strict
 
 import json
-import subprocess
-import sys
 import os
 import re
-from typing import List, Optional, Callable, Dict, Any, Tuple, Union
+import subprocess
+import sys
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 # Define type aliases for our sorting keys
 DateVersionKey = Tuple[
@@ -53,13 +53,12 @@ class OCIClient:
     def _get_cache_filepath(self) -> str:
         """
         Generates a safe and unique cache file path in /tmp/ for the token.
-        Replaces '/' in the repository name with '_' to avoid directory creation.
+        Uses a single token file for all GHCR repositories.
         """
         if self._cache_path_override:
             return self._cache_path_override
 
-        safe_repo_name = self.repository.replace("/", "_")
-        return f"/tmp/gcr_token_{safe_repo_name}"
+        return "/tmp/oci_ghcr_token"
 
     def get_token(self) -> Optional[str]:
         """
@@ -968,19 +967,19 @@ def _extract_version_key(tag: str) -> str:
         subver_part = match.group(2) if match.group(2) else ""
         return f"{date_part}.{subver_part}"
 
-    # For non-matching formats, return the tag itself as the key
-    return tag
+    # For non-matching formats, return the tag itself as the key (lowercase for case-insensitive comparison)
+    return tag.lower()
 
 
 def _should_replace_tag(existing_tag: str, new_tag: str) -> bool:
     """
     Determine if a new tag should replace an existing tag during deduplication.
-    When there are duplicates, prefer the prefixed version (stable- or testing-)
+    When there are duplicates, prefer the prefixed version (stable-, testing-, unstable-)
     over the unprefixed version with the same content.
     """
     # If the new tag has a prefix but the existing doesn't, prefer the new one
-    new_has_prefix = new_tag.startswith(("stable-", "testing-"))
-    existing_has_prefix = existing_tag.startswith(("stable-", "testing-"))
+    new_has_prefix = new_tag.startswith(("stable-", "testing-", "unstable-"))
+    existing_has_prefix = existing_tag.startswith(("stable-", "testing-", "unstable-"))
 
     if new_has_prefix and not existing_has_prefix:
         return True

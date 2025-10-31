@@ -1,39 +1,40 @@
 """Unit tests for ublue-rebase-helper (urh.py)."""
 
 import json
-import subprocess
-from unittest.mock import MagicMock
 import os
+import subprocess
 import sys
+from typing import List
+from unittest.mock import MagicMock
+
 import pytest
 from pytest_mock import MockerFixture
-from typing import List
 
 # Add the parent directory to sys.path so we can import urh
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from urh import (
-    run_command,
-    show_command_menu,
-    rebase_command,
-    remote_ls_command,
-    check_command,
-    ls_command,
-    rollback_command,
-    pin_command,
-    unpin_command,
-    rm_command,
-    upgrade_command,
-    show_rebase_submenu,
-    show_remote_ls_submenu,
-    help_command,
-    get_commands_with_descriptions,
-    get_container_options,
-    main,
-    parse_deployments,
-    show_deployment_submenu,
     MenuExitException,
     OCIClient,
+    check_command,
+    get_commands_with_descriptions,
+    get_container_options,
+    help_command,
+    ls_command,
+    main,
+    parse_deployments,
+    pin_command,
+    rebase_command,
+    remote_ls_command,
+    rm_command,
+    rollback_command,
+    run_command,
+    show_command_menu,
+    show_deployment_submenu,
+    show_rebase_submenu,
+    show_remote_ls_submenu,
+    unpin_command,
+    upgrade_command,
 )
 
 
@@ -1664,13 +1665,10 @@ class TestOCIClient:
 
     def test_get_cache_filepath_format(self, mock_client: OCIClient):
         """Test that the cache filepath is generated correctly and safely."""
-        assert mock_client._get_cache_filepath() == "/tmp/gcr_token_test_test-repo"
+        assert mock_client._get_cache_filepath() == "/tmp/oci_ghcr_token"
 
         client_with_slash = OCIClient("my-org/my-project")
-        assert (
-            client_with_slash._get_cache_filepath()
-            == "/tmp/gcr_token_my-org_my-project"
-        )
+        assert client_with_slash._get_cache_filepath() == "/tmp/oci_ghcr_token"
 
     @pytest.mark.parametrize(
         "input_tags,expected_filtered_tags",
@@ -2580,7 +2578,7 @@ class TestRemoteLsCommand:
 
         # Test the actual OCIClient functionality to make sure it limits properly
         # Create a real client instance to test the actual filtering logic
-        client = OCIClient("test/repo", cache_path="/tmp/test_cache")
+        client = OCIClient("test/repo", cache_path="/tmp/oci_ghcr_token")
         # Create a test input with >30 tags
         test_data = {"tags": many_tags}
 

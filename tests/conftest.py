@@ -1,7 +1,8 @@
 """Shared fixtures and test configuration for ublue-rebase-helper tests."""
 
-import sys
 import os
+import sys
+
 import pytest
 
 # Add the parent directory to sys.path so we can import urh
@@ -60,5 +61,5 @@ def mock_print(mocker):
 def mock_client() -> OCIClient:
     """Provides a OCIClient instance for testing."""
     repo = "test/test-repo"
-    instance = OCIClient(repo, cache_path="/tmp/gcr_token_test_test-repo")
+    instance = OCIClient(repo, cache_path="/tmp/oci_ghcr_token")
     return instance
