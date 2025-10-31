@@ -11,14 +11,11 @@ This is a Python project that uses:
 - `pytest-mock` for mocking capabilities in tests
 - `ruff` for formatting and linting
 - `pyright` for type checking
+- `prettier` for formatting/linting of markdown files
 
 ## Testing Commands
 
-When running tests, AI agents should use the following command:
-
-```bash
-uv run pytest
-```
+When running tests, AI agents should use the following command `uv run pytest`.
 
 For more specific test runs, agents can use standard pytest options:
 
@@ -26,20 +23,22 @@ For more specific test runs, agents can use standard pytest options:
 - `uv run pytest tests/test_integrations.py` - run integration tests
 - `uv run pytest tests/test_e2e.py` - run end-to-end tests
 - `uv run pytest -v` - run with verbose output
-- `uv run slipcover -m pytest` - run with code coverage
+- `uv run slipcover -m pytest -v` - run with test harness for code coverage report
 
 ## Code Formatting and Linting
 
-AI agents should format and lint changes to code using this command: `ruff format .; ruff check . --fix; pyright .`
+AI agents should format and lint changes to code using this command: `ruff check --select I --fix; ruff format; pyright`. Likewise, if either our `AGENTS.md` or `DESIGN.md` are changed then `prettier --cache -c -w *.md` should be run afterward to ensure consistent formatting.
 
 Formatting and linting should be run before finishing any code changes.
 
 ## Recommended Workflow
 
-1. After making code changes, run `ruff format .; ruff check . --fix; pyright .` to format/lint the code
-2. Run `ruff check . --fix` to check for linting issues
-3. Run `pyright .` to check for type errors
-4. Run `uv run pytest -x -v` to ensure all tests pass
+1. Read `DESIGN.md` and adhere to our existing design spec before constructing any code changes or action plans
+2. After making code changes, run `ruff check --select I --fix; ruff format; pyright` to format/lint the code
+3. Run `ruff check --select I --fix; ruff format` to check and correct for linting and/or formatting issues
+4. Run `prettier --cache -c -w *.md` from the project root to format markdown files
+5. Run `pyright` to check for type errors
+6. Run `uv run pytest -vs` to ensure all tests pass
 
 ## Project Structure
 
@@ -52,11 +51,12 @@ Formatting and linting should be run before finishing any code changes.
 
 ## Best Practices for AI Agents
 
+- Before attempting to make any design changes to project files create a comprehensive but concise step-by-step action plan that the user must explicitly approve before changing anything
 - Always run the full test suite with `uv run pytest` after making changes
-- Use `pytest-mock` for creating test doubles when writing tests
+- Use `pytest-mock` fixtures for creating test mocking when writing tests
 - Follow existing code style and patterns in the project
-- Use `ruff format .` before committing changes
-- Verify type correctness with `pyright .` before finalizing changes
+- Use `ruff check --select I --fix; ruff format` before committing changes
+- Verify type correctness with `pyright` before finalizing changes
 - Add appropriate unit tests for new functionality
 - Ensure all existing tests continue to pass
 - When implementing new features or making significant changes, a planning step must be presented to and approved by the user before any code changes are applied to the codebase

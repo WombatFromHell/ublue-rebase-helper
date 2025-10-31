@@ -235,6 +235,51 @@ class OCIClient:
                     break
         return link_header
 
+    def _process_response(self, stdout_text: str) -> Optional[Dict[str, Any]]:
+        """
+        Process the HTTP response from curl.
+
+        Args:
+            stdout_text: The raw response text from curl
+
+        Returns:
+            A dictionary containing the parsed response if successful, None otherwise.
+        """
+        # Parse headers and body from the response
+        headers_part, body = self._parse_response_headers_and_body(stdout_text)
+
+        # Find Link header in headers_part
+        link_header = self._extract_link_header(headers_part)
+
+        # Parse tags from the response body
+        try:
+            response_data = json.loads(body)
+            return {"tags_data": response_data, "link_header": link_header}
+        except json.JSONDecodeError as e:
+            print(f"Error parsing tags response: {e}")
+            print(f"Response body: {body}")
+            return None
+
+    def _make_request_with_token(
+        self, url: str, token: str
+    ) -> subprocess.CompletedProcess[str]:
+        """
+        Make a request to the given URL with the provided token.
+
+        Args:
+            url: The URL to fetch tags from
+            token: The OAuth2 token to use for authentication
+
+        Returns:
+            The subprocess result
+        """
+        return subprocess.run(
+            ["curl", "-s", "-i", "-H", f"Authorization: Bearer {token}", url],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
     def _fetch_single_page_tags(self, url: str, token: str) -> Optional[Dict[str, Any]]:
         """
         Fetch a single page of tags from the given URL with the provided token.
@@ -247,33 +292,10 @@ class OCIClient:
         Returns:
             A dictionary containing the tags if successful, None otherwise.
         """
-
-        def _process_response(stdout_text: str) -> Optional[Dict[str, Any]]:
-            # Parse headers and body from the response
-            headers_part, body = self._parse_response_headers_and_body(stdout_text)
-
-            # Find Link header in headers_part
-            link_header = self._extract_link_header(headers_part)
-
-            # Parse tags from the response body
-            try:
-                response_data = json.loads(body)
-                return {"tags_data": response_data, "link_header": link_header}
-            except json.JSONDecodeError as e:
-                print(f"Error parsing tags response: {e}")
-                print(f"Response body: {body}")
-                return None
-
+        # First try with the original token
         try:
-            result = subprocess.run(
-                ["curl", "-s", "-i", "-H", f"Authorization: Bearer {token}", url],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-
-            return _process_response(result.stdout)
-
+            result = self._make_request_with_token(url, token)
+            return self._process_response(result.stdout)
         except subprocess.CalledProcessError as e:
             # Check if the failure was due to an invalid/expired token
             if "401" in e.stderr or "403" in e.stderr:
@@ -285,24 +307,11 @@ class OCIClient:
                 if new_token:
                     # Retry the request once with the new token
                     try:
-                        retry_result = subprocess.run(
-                            [
-                                "curl",
-                                "-s",
-                                "-i",
-                                "-H",
-                                f"Authorization: Bearer {new_token}",
-                                url,
-                            ],
-                            capture_output=True,
-                            text=True,
-                            check=True,
-                        )
-
-                        result = _process_response(retry_result.stdout)
-                        if result:
+                        retry_result = self._make_request_with_token(url, new_token)
+                        processed_result = self._process_response(retry_result.stdout)
+                        if processed_result:
                             print("Retry successful.")
-                        return result
+                        return processed_result
                     except subprocess.CalledProcessError as retry_e:
                         print(f"Retry also failed: {retry_e.stderr}")
                         return None
@@ -494,55 +503,126 @@ def run_gum_submenu(
     Returns:
         Selected option string or None if no selection made
     """
-    # Check if we're running in a TTY context before using gum
-    if is_tty_func():  # stdout is a TTY
-        try:
-            result = subprocess_run_func(
-                [
-                    "gum",
-                    "choose",
-                    "--cursor",
-                    "→",
-                    "--selected-prefix",
-                    "✓ ",
-                    "--header",
-                    header,
-                ]
-                + options,
-                text=True,
-                stdout=subprocess.PIPE,  # Only capture stdout to get user selection
-                # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
-            )
-
-            if result.returncode == 0:
-                selected_option = result.stdout.strip()
-                return selected_option
-            else:
-                # gum failed or no selection made (ESC or Ctrl+C)
-                # When ESC is pressed in gum, it returns exit code 1
-                if result.returncode == 1:
-                    # Check if we're in a test environment
-                    in_test_mode = "PYTEST_CURRENT_TEST" in os.environ
-                    if in_test_mode:
-                        # In test mode, print message and return None for integration tests
-                        print_func(no_selection_message)
-                        return None
-                    else:
-                        # avoid printing fallback message on ESC
-                        sys.stdout.write("\033[F\033[K")
-                        sys.stdout.flush()
-                        # In normal mode, raise exception with context
-                        raise MenuExitException(is_main_menu=is_main_menu)
-                # For other errors, return None
-                return None
-        except FileNotFoundError:
-            # gum not found, show the list only
-            display_func_gum_not_found(print_func)
-            return None
-    else:
-        # Not running in TTY, show the list only
+    # If not running in TTY, show the list only
+    if not is_tty_func():
         display_func_non_tty(print_func)
         return None
+
+    # Try to run gum
+    try:
+        result = subprocess_run_func(
+            [
+                "gum",
+                "choose",
+                "--cursor",
+                "→",
+                "--selected-prefix",
+                "✓ ",
+                "--header",
+                header,
+            ]
+            + options,
+            text=True,
+            stdout=subprocess.PIPE,  # Only capture stdout to get user selection
+            # stdin and stderr will inherit from the parent process, allowing gum's UI to appear
+        )
+
+        # Handle successful selection
+        if result.returncode == 0:
+            selected_option = result.stdout.strip()
+            return selected_option
+
+        # Handle gum exit code 1 (ESC or Ctrl+C)
+        if result.returncode == 1:
+            return _handle_gum_no_selection(
+                print_func, no_selection_message, is_main_menu
+            )
+
+        # For other errors, return None
+        return None
+
+    except FileNotFoundError:
+        # gum not found, show the list only
+        display_func_gum_not_found(print_func)
+        return None
+
+
+def _handle_gum_no_selection(
+    print_func: Callable[[str], Any], no_selection_message: str, is_main_menu: bool
+) -> Optional[str]:
+    """
+    Handle the case when gum returns exit code 1 (no selection made).
+
+    Args:
+        print_func: Function for printing
+        no_selection_message: Message to display when no selection is made
+        is_main_menu: Whether this is the main menu
+
+    Returns:
+        None, but may raise MenuExitException
+    """
+    # Check if we're in a test environment
+    in_test_mode = "PYTEST_CURRENT_TEST" in os.environ
+    if in_test_mode:
+        # In test mode, print message and return None for integration tests
+        print_func(no_selection_message)
+        return None
+    else:
+        # avoid printing fallback message on ESC
+        sys.stdout.write("\033[F\033[K")
+        sys.stdout.flush()
+        # In normal mode, raise exception with context
+        raise MenuExitException(is_main_menu=is_main_menu)
+
+
+def parse_command_argument(
+    args: List[str],
+    submenu_func: Callable[[], Optional[Any]],
+    arg_parser: Optional[Callable[[str], Any]],
+) -> Optional[Any]:
+    """
+    Parse command argument, either from provided args or from submenu.
+
+    Args:
+        args: Command line arguments
+        submenu_func: Function to call when no arguments provided
+        arg_parser: Function to parse the argument
+
+    Returns:
+        The parsed argument value, or None if no selection made
+    """
+    if not args:
+        # No arguments provided, show submenu to select
+        selected_value = submenu_func()
+        # If submenu raises an exception (like MenuExitException), it will propagate up
+        # If submenu returns None, we exit gracefully
+        if selected_value is None or arg_parser is None:
+            return None  # No selection made, exit gracefully
+        return arg_parser(selected_value)
+    else:
+        if arg_parser is None:
+            return str(args[0])  # Default to string parsing if no parser provided
+        return arg_parser(args[0])
+
+
+def get_error_message(
+    args: List[str], error_message_func: Optional[Callable[[str], str]]
+) -> str:
+    """
+    Get the appropriate error message for invalid arguments.
+
+    Args:
+        args: Command line arguments
+        error_message_func: Optional function to format error message
+
+    Returns:
+        The error message string
+    """
+    # Default error message if no custom function provided
+    if error_message_func:
+        return error_message_func(args[0])
+    else:
+        return f"Invalid argument: {args[0]}"
 
 
 def handle_command_with_submenu(
@@ -562,28 +642,17 @@ def handle_command_with_submenu(
         arg_parser: Optional function to parse the argument (default: str)
         error_message_func: Optional function to format error message (default: uses arg_parser name)
     """
-    if not args:
-        # No arguments provided, show submenu to select
-        if arg_parser is None:
-            arg_parser = str  # Default to string parsing
+    if arg_parser is None:
+        arg_parser = str  # Default to string parsing
 
-        selected_value = submenu_func()
-        # If submenu raises an exception (like MenuExitException), it will propagate up
-        # If submenu returns None, we exit gracefully
-        if selected_value is None:
+    try:
+        parsed_value = parse_command_argument(args, submenu_func, arg_parser)
+        if parsed_value is None:
             return  # No selection made, exit gracefully
-        parsed_value = arg_parser(selected_value)
-    else:
-        try:
-            parsed_value = arg_parser(args[0]) if arg_parser else str(args[0])
-        except ValueError:
-            # Default error message if no custom function provided
-            if error_message_func:
-                error_msg = error_message_func(args[0])
-            else:
-                error_msg = f"Invalid argument: {args[0]}"
-            print(error_msg)
-            return
+    except ValueError:
+        error_msg = get_error_message(args, error_message_func)
+        print(error_msg)
+        return
 
     cmd = cmd_builder(parsed_value)
     sys.exit(run_command(cmd))
@@ -713,6 +782,44 @@ def rebase_command(
     handle_command_with_submenu(args, show_rebase_submenu_func, cmd_builder)
 
 
+def extract_repository_from_url(url: str) -> str:
+    """
+    Extract the repository name from a container URL.
+
+    Args:
+        url: The container URL (e.g., "ghcr.io/user/repo:tag")
+
+    Returns:
+        The repository name (e.g., "user/repo")
+    """
+    if url.startswith(("ghcr.io/", "docker.io/", "quay.io/", "gcr.io/")):
+        # Extract the part after the registry
+        registry_removed = url.split("/", 1)[1]
+        # Remove the tag part if present
+        repo_part = registry_removed.split(":")[0]
+    else:
+        # For URLs that don't start with a specific registry, assume it's the full repo part
+        repo_part = url.split(":")[0] if ":" in url else url
+    return repo_part
+
+
+def extract_context_from_url(url: str) -> Optional[str]:
+    """
+    Extract the tag context from a URL (e.g., "testing", "stable", "unstable").
+
+    Args:
+        url: The container URL
+
+    Returns:
+        The tag context if present, None otherwise
+    """
+    if ":" in url:
+        url_tag = url.split(":")[-1]
+        if url_tag in ["testing", "stable", "unstable"]:
+            return url_tag
+    return None
+
+
 def remote_ls_command(
     args: List[str],
     show_remote_ls_submenu_func: Optional[Callable[[], Optional[str]]] = None,
@@ -732,21 +839,10 @@ def remote_ls_command(
         """Handle the selected or provided URL by listing its tags."""
         try:
             # Extract the repository name from the URL (e.g., from "ghcr.io/user/repo:tag" get "user/repo")
-            if url.startswith(("ghcr.io/", "docker.io/", "quay.io/", "gcr.io/")):
-                # Extract the part after the registry
-                registry_removed = url.split("/", 1)[1]
-                # Remove the tag part if present
-                repo_part = registry_removed.split(":")[0]
-            else:
-                # For URLs that don't start with a specific registry, assume it's the full repo part
-                repo_part = url.split(":")[0] if ":" in url else url
+            repo_part = extract_repository_from_url(url)
 
             # Determine the tag context from the URL (e.g., "testing", "stable", "unstable", etc.)
-            url_tag_context = None
-            if ":" in url:
-                url_tag = url.split(":")[-1]
-                if url_tag in ["testing", "stable", "unstable"]:
-                    url_tag_context = url_tag
+            url_tag_context = extract_context_from_url(url)
 
             # Create OCIClient instance
             client = OCIClient(repo_part)
@@ -872,6 +968,46 @@ def _should_filter_tag_common(tag: str) -> bool:
     return False
 
 
+def _context_filter_tags(tags: List[str], url_context: str) -> List[str]:
+    """
+    Filter tags to only include those with the matching context prefix.
+
+    Args:
+        tags: List of tags to filter
+        url_context: The context to filter by (e.g., "testing", "stable")
+
+    Returns:
+        List of tags that match the context
+    """
+    context_prefix = f"{url_context}-"
+    return [tag for tag in tags if tag.startswith(context_prefix)]
+
+
+def _deduplicate_tags_by_version(tags: List[str]) -> List[str]:
+    """
+    Deduplicate tags by extracting version information to keep unique versions.
+
+    Args:
+        tags: List of tags to deduplicate
+
+    Returns:
+        List of deduplicated tags
+    """
+    # Create a dict to store the best tag for each unique version pattern
+    unique_version_tags: Dict[str, str] = {}
+
+    for tag in tags:
+        # Extract version information for deduplication
+        version_key = _extract_version_key(tag)
+        if version_key not in unique_version_tags or _should_replace_tag(
+            unique_version_tags[version_key], tag
+        ):
+            unique_version_tags[version_key] = tag
+
+    # Get the unique tags
+    return list(unique_version_tags.values())
+
+
 def _context_aware_filter_and_sort(
     tags: List[str], url_context: Optional[str] = None
 ) -> List[str]:
@@ -893,14 +1029,7 @@ def _context_aware_filter_and_sort(
 
     if url_context:
         # If URL has a tag context (like :testing or :stable), only show tags with that prefix
-        # Filter to only include tags with the matching context prefix
-        context_prefix = f"{url_context}-"
-        context_filtered_tags: List[str] = []
-
-        for tag in filtered_tags:
-            # Only include tags that start with the context prefix (e.g., "stable-")
-            if tag.startswith(context_prefix):
-                context_filtered_tags.append(tag)
+        context_filtered_tags = _context_filter_tags(filtered_tags, url_context)
 
         # Sort by context-aware sorting function
         sorted_tags: List[str] = sorted(
@@ -911,19 +1040,7 @@ def _context_aware_filter_and_sort(
         )
     else:
         # When no context specified, deduplicate by extracting version information
-        # Create a dict to store the best tag for each unique version pattern
-        unique_version_tags: Dict[str, str] = {}
-
-        for tag in filtered_tags:
-            # Extract version information for deduplication
-            version_key = _extract_version_key(tag)
-            if version_key not in unique_version_tags or _should_replace_tag(
-                unique_version_tags[version_key], tag
-            ):
-                unique_version_tags[version_key] = tag
-
-        # Get the unique tags
-        unique_tags = list(unique_version_tags.values())
+        unique_tags = _deduplicate_tags_by_version(filtered_tags)
 
         # Use basic date-based sorting without preferencing prefixes
         sorted_tags: List[str] = sorted(
@@ -1010,11 +1127,11 @@ def _extract_prefix_and_clean_tag(tag: str) -> Tuple[Optional[str], str]:
         return None, tag
 
 
-def _parse_version_components(
+def _parse_xx_yyyymmdd_format(
     clean_tag: str,
-) -> Optional[Tuple[Optional[int], int, int, int, int]]:
+) -> Optional[Tuple[int, int, int, int, int]]:
     """
-    Parse version components from a clean tag (without prefix).
+    Parse XX.YYYYMMDD[.SUBVER] format.
 
     Args:
         clean_tag: Tag without any prefix
@@ -1024,7 +1141,6 @@ def _parse_version_components(
     """
     import re
 
-    # Try XX.YYYYMMDD[.SUBVER] format first
     match = re.match(r"^(\d+)\.(\d{8})(?:\.(\d+))?$", clean_tag)
     if match:
         version_series_str = match.group(1)  # XX
@@ -1039,8 +1155,21 @@ def _parse_version_components(
         subver = int(subver_str) if subver_str is not None else 0
 
         return version_series, year, month, day, subver
+    return None
 
-    # Try YYYYMMDD[.SUBVER] format
+
+def _parse_yyyymmdd_format(clean_tag: str) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Parse YYYYMMDD[.SUBVER] format.
+
+    Args:
+        clean_tag: Tag without any prefix
+
+    Returns:
+        A tuple of (year, month, day, subver) or None if no match
+    """
+    import re
+
     match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
     if match:
         date_str = match.group(1)  # YYYYMMDD
@@ -1052,9 +1181,166 @@ def _parse_version_components(
         day = int(date_str[6:8])
         subver = int(subver_str) if subver_str is not None else 0
 
+        return year, month, day, subver
+    return None
+
+
+def _parse_version_components(
+    clean_tag: str,
+) -> Optional[Tuple[Optional[int], int, int, int, int]]:
+    """
+    Parse version components from a clean tag (without prefix).
+
+    Args:
+        clean_tag: Tag without any prefix
+
+    Returns:
+        A tuple of (version_series, year, month, day, subver) or None if no match
+    """
+    # Try XX.YYYYMMDD[.SUBVER] format first
+    result = _parse_xx_yyyymmdd_format(clean_tag)
+    if result:
+        version_series, year, month, day, subver = result
+        return version_series, year, month, day, subver
+
+    # Try YYYYMMDD[.SUBVER] format
+    result = _parse_yyyymmdd_format(clean_tag)
+    if result:
+        year, month, day, subver = result
         return None, year, month, day, subver  # version_series is None for this format
 
     return None  # No match for known formats
+
+
+def _create_date_sort_key(
+    year: int, month: int, day: int, subver: int
+) -> DateVersionKey:
+    """
+    Create a sort key for date-based version formats.
+
+    Args:
+        year: The year component
+        month: The month component
+        day: The day component
+        subver: The subversion component
+
+    Returns:
+        A tuple for date-based sorting
+    """
+    return (-1, -year, -month, -day, -subver)
+
+
+def _create_version_series_sort_key(
+    version_series: int, year: int, month: int, day: int, subver: int
+) -> DateVersionKey:
+    """
+    Create a sort key for version series formats (XX.YYYYMMDD).
+
+    Args:
+        version_series: The version series component
+        year: The year component
+        month: The month component
+        day: The day component
+        subver: The subversion component
+
+    Returns:
+        A tuple for version series sorting
+    """
+    return (-10000 - version_series, -year, -month, -day, -subver)
+
+
+def _create_context_date_sort_key(
+    year: int, month: int, day: int, subver: int, context_priority: int
+) -> DateVersionKey:
+    """
+    Create a sort key for date-based formats with context priority.
+
+    Args:
+        year: The year component
+        month: The month component
+        day: The day component
+        subver: The subversion component
+        context_priority: The context priority value
+
+    Returns:
+        A tuple for context-aware date sorting
+    """
+    return (
+        -1,  # Original behavior: -1 for date-based versions
+        -year,
+        -month,
+        -day,
+        -subver,
+    )
+
+
+def _create_context_version_series_sort_key(
+    version_series: int,
+    year: int,
+    month: int,
+    day: int,
+    subver: int,
+    context_priority: int,
+) -> DateVersionKey:
+    """
+    Create a sort key for version series formats with context priority.
+
+    Args:
+        version_series: The version series component
+        year: The year component
+        month: The month component
+        day: The day component
+        subver: The subversion component
+        context_priority: The context priority value
+
+    Returns:
+        A tuple for context-aware version series sorting
+    """
+    return (
+        context_priority * 10000 - version_series,
+        -year,
+        -month,
+        -day,
+        -subver,
+    )
+
+
+def _create_alpha_sort_key(tag: str, context_priority: int = 0) -> AlphaVersionKey:
+    """
+    Create a sort key for non-date formats using reverse alphabetical order.
+
+    Args:
+        tag: The tag to create a sort key for
+        context_priority: The context priority value (only used in context-aware mode)
+
+    Returns:
+        A tuple for alphabetical sorting
+    """
+    return (
+        0,
+        tuple(-ord(c) for c in tag.lower()),
+    )
+
+
+def _create_context_alpha_sort_key(
+    tag: str, tag_prefix: Optional[str], url_context: Optional[str]
+) -> AlphaVersionKey:
+    """
+    Create a sort key for non-date formats with context priority.
+
+    Args:
+        tag: The tag to create a sort key for
+        tag_prefix: The prefix of the tag
+        url_context: The URL context to match against
+
+    Returns:
+        A tuple for context-aware alphabetical sorting
+    """
+    context_priority = 0 if tag_prefix == url_context else 1
+    return (
+        context_priority * 10000 - 20000,
+        tuple(-ord(c) for c in tag.lower()),
+    )
 
 
 def _create_version_sort_key(
@@ -1087,58 +1373,31 @@ def _create_version_sort_key(
 
             if version_series is not None:
                 # XX.YYYYMMDD[.SUBVER] format
-                # Return tuple with context priority combined with version series (descending), then date (descending), then subver (descending)
-                return (
-                    context_priority * 10000 - version_series,
-                    -year,
-                    -month,
-                    -day,
-                    -subver,
+                return _create_context_version_series_sort_key(
+                    version_series, year, month, day, subver, context_priority
                 )
             else:
-                # YYYYMMDD[.SUBVER] format - this should get priority -1 to match original
-                # Return tuple with context priority combined with base -1, then date (descending), then subver (descending)
-                return (
-                    -1,  # Original behavior: -1 for date-based versions
-                    -year,
-                    -month,
-                    -day,
-                    -subver,
+                # YYYYMMDD[.SUBVER] format
+                return _create_context_date_sort_key(
+                    year, month, day, subver, context_priority
                 )
         else:
             # No context priority - regular version sorting
             if version_series is not None:
                 # XX.YYYYMMDD[.SUBVER] format
-                return (
-                    -10000 - version_series,  # Keep this as is
-                    -year,
-                    -month,
-                    -day,
-                    -subver,
+                return _create_version_series_sort_key(
+                    version_series, year, month, day, subver
                 )
             else:
-                # YYYYMMDD[.SUBVER] format - should get priority -1 to match original behavior
-                return (
-                    -1,  # Original behavior: -1 for date-based versions
-                    -year,
-                    -month,
-                    -day,
-                    -subver,
-                )  # -1 matches the original priority for date-based tags
+                # YYYYMMDD[.SUBVER] format
+                return _create_date_sort_key(year, month, day, subver)
     else:
         # For tags that don't match the expected format, use reverse alphabetical
         if include_context_priority and url_context:
-            context_priority = 0 if tag_prefix == url_context else 1
-            return (
-                context_priority * 10000 - 20000,
-                tuple(-ord(c) for c in tag.lower()),
-            )
+            return _create_context_alpha_sort_key(tag, tag_prefix, url_context)
         else:
-            # For non-date formats, use reverse alphabetical order (same as original for non-matching)
-            return (
-                0,
-                tuple(-ord(c) for c in tag.lower()),
-            )  # 0 for non-matching formats like original
+            # For non-date formats, use reverse alphabetical order
+            return _create_alpha_sort_key(tag)
 
 
 def check_command(args: List[str]):
@@ -1205,91 +1464,216 @@ def unpin_command(
     handle_command_with_submenu(args, submenu_func, cmd_builder, int, error_message)
 
 
-def parse_deployments() -> List[Dict[str, Any]]:
-    """Parse rpm-ostree status -v to extract deployment information."""
+def get_rpm_ostree_status_output() -> Optional[str]:
+    """
+    Get the output from 'rpm-ostree status -v' command.
+
+    Returns:
+        The command output as a string, or None if the command failed
+    """
     try:
         result = subprocess.run(
             ["rpm-ostree", "status", "-v"], capture_output=True, text=True
         )
         if result.returncode != 0:
             print("Error getting deployments")
-            return []
-
-        deployments: List[Dict[str, Any]] = []
-        lines = result.stdout.split("\n")
-
-        i = 0
-        while i < len(lines):
-            line = lines[i].rstrip()  # Use rstrip() to preserve indentation
-
-            # Check if this line starts a new deployment (starts with ● or space)
-            if line.startswith("●") or (
-                line.startswith(" ") and "ostree-image-signed:" in line
-            ):
-                # This is a deployment line, extract the index
-                deployment_info: Dict[str, Any] = {
-                    "index": None,
-                    "version": None,
-                    "pinned": False,
-                    "current": line.startswith(
-                        "●"
-                    ),  # Mark if it's the current deployment
-                }
-
-                # Extract index from this line
-                if "index:" in line:
-                    start_idx = line.find("index:") + len("index:")
-                    end_idx = line.find(")", start_idx)
-                    if end_idx != -1:
-                        index_str = line[start_idx:end_idx].strip()
-                        try:
-                            deployment_info["index"] = int(index_str)
-                        except ValueError:
-                            pass  # Keep as None if can't parse
-
-                # Continue processing subsequent lines for this deployment
-                i += 1
-                while i < len(lines):
-                    next_line = lines[i].strip()
-
-                    # If we hit an empty line or a new deployment, break
-                    if (
-                        not next_line
-                        or next_line.startswith("●")
-                        or next_line.startswith(" ")
-                        and "ostree-image-signed:" in next_line
-                    ):
-                        break
-
-                    # Look for Version field
-                    if next_line.startswith("Version:"):
-                        version_info = next_line[len("Version:") :].strip()
-                        deployment_info["version"] = version_info
-
-                    # Look for Pinned field
-                    elif next_line.startswith("Pinned:"):
-                        pinned_info = next_line[len("Pinned:") :].strip()
-                        deployment_info["pinned"] = pinned_info.lower() == "yes"
-
-                    i += 1
-
-                # Add this deployment to our list
-                if deployment_info["index"] is not None:
-                    deployments.append(deployment_info)
-
-                # Don't increment i here since we already did it in the inner loop
-                continue  # Continue to the next iteration of the outer loop
-
-            i += 1
-
-        return deployments
-
+            return None
+        return result.stdout
     except subprocess.CalledProcessError:
         print("Error running rpm-ostree status command")
-        return []
+        return None
     except Exception:
-        print("Error parsing deployments")
+        print(
+            "Error parsing deployments"
+        )  # Maintain original message for test compatibility
+        return None
+
+
+def is_deployment_line(line: str) -> bool:
+    """
+    Check if a line represents the start of a deployment.
+
+    Args:
+        line: The line to check
+
+    Returns:
+        True if the line represents a deployment start, False otherwise
+    """
+    return line.startswith("●") or (
+        line.startswith(" ") and "ostree-image-signed:" in line
+    )
+
+
+def extract_deployment_index(line: str) -> Optional[int]:
+    """
+    Extract the deployment index from a deployment line.
+
+    Args:
+        line: The deployment line
+
+    Returns:
+        The deployment index, or None if not found or not parseable
+    """
+    if "index:" in line:
+        start_idx = line.find("index:") + len("index:")
+        end_idx = line.find(")", start_idx)
+        if end_idx != -1:
+            index_str = line[start_idx:end_idx].strip()
+            try:
+                return int(index_str)
+            except ValueError:
+                pass  # Keep as None if can't parse
+    return None
+
+
+def is_new_deployment_line(line: str) -> bool:
+    """
+    Check if a line represents the start of a new deployment.
+
+    Args:
+        line: The line to check
+
+    Returns:
+        True if the line represents a new deployment start, False otherwise
+    """
+    return line.startswith("●") or (
+        line.startswith(" ") and "ostree-image-signed:" in line
+    )
+
+
+def is_version_line(line: str) -> bool:
+    """
+    Check if a line contains version information.
+
+    Args:
+        line: The line to check
+
+    Returns:
+        True if the line contains version information, False otherwise
+    """
+    return line.startswith("Version:")
+
+
+def is_pinned_line(line: str) -> bool:
+    """
+    Check if a line contains pinned information.
+
+    Args:
+        line: The line to check
+
+    Returns:
+        True if the line contains pinned information, False otherwise
+    """
+    return line.startswith("Pinned:")
+
+
+def extract_version_from_line(line: str) -> str:
+    """
+    Extract version information from a version line.
+
+    Args:
+        line: The version line
+
+    Returns:
+        The version information
+    """
+    return line[len("Version:") :].strip()
+
+
+def extract_pinned_from_line(line: str) -> bool:
+    """
+    Extract pinned status from a pinned line.
+
+    Args:
+        line: The pinned line
+
+    Returns:
+        True if the deployment is pinned, False otherwise
+    """
+    pinned_info = line[len("Pinned:") :].strip()
+    return pinned_info.lower() == "yes"
+
+
+def parse_deployment_details(
+    lines: List[str], start_idx: int
+) -> Tuple[Dict[str, Any], int]:
+    """
+    Parse details for a single deployment starting from a specific line index.
+
+    Args:
+        lines: List of lines from rpm-ostree status output
+        start_idx: Index of the line that starts the deployment
+
+    Returns:
+        A tuple of (deployment_info, next_idx) where next_idx is where to continue parsing
+    """
+    line = lines[start_idx].rstrip()
+
+    deployment_info: Dict[str, Any] = {
+        "index": extract_deployment_index(line),
+        "version": None,
+        "pinned": False,
+        "current": line.startswith("●"),  # Mark if it's the current deployment
+    }
+
+    # Continue processing subsequent lines for this deployment
+    i = start_idx + 1
+    while i < len(lines):
+        next_line = lines[i].strip()
+
+        # If we hit an empty line or a new deployment, break
+        if not next_line or is_new_deployment_line(next_line):
+            break
+
+        # Look for Version field
+        if is_version_line(next_line):
+            deployment_info["version"] = extract_version_from_line(next_line)
+
+        # Look for Pinned field
+        elif is_pinned_line(next_line):
+            deployment_info["pinned"] = extract_pinned_from_line(next_line)
+
+        i += 1
+
+    return deployment_info, i
+
+
+def filter_valid_deployments(deployments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filter out deployments that don't have a valid index.
+
+    Args:
+        deployments: List of deployments to filter
+
+    Returns:
+        List of deployments with valid indices
+    """
+    return [d for d in deployments if d["index"] is not None]
+
+
+def parse_deployments() -> List[Dict[str, Any]]:
+    """Parse rpm-ostree status -v to extract deployment information."""
+    output = get_rpm_ostree_status_output()
+    if not output:
         return []
+
+    lines = output.split("\n")
+    deployments: List[Dict[str, Any]] = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i].rstrip()
+
+        # Check if this line starts a new deployment
+        if is_deployment_line(line):
+            deployment_info, next_idx = parse_deployment_details(lines, i)
+            deployments.append(deployment_info)
+            i = next_idx
+        else:
+            i += 1
+
+    # Return only deployments with valid indices
+    return filter_valid_deployments(deployments)
 
 
 def show_deployment_submenu(
@@ -1426,6 +1810,57 @@ def execute_command_with_args(command_parts: List[str], args: List[str]) -> None
     sys.exit(run_command(cmd))
 
 
+def get_command_registry() -> Dict[str, Callable[[List[str]], None]]:
+    """
+    Get the registry of available commands mapped to their functions.
+
+    Returns:
+        A dictionary mapping command names to their respective functions
+    """
+    return {
+        "rebase": rebase_command,
+        "remote-ls": remote_ls_command,
+        "check": check_command,
+        "upgrade": upgrade_command,
+        "ls": ls_command,
+        "rollback": rollback_command,
+        "pin": pin_command,
+        "unpin": unpin_command,
+        "rm": rm_command,
+        "help": help_command,
+    }
+
+
+def execute_command(
+    command: str, args: List[str], is_interactive: bool = False
+) -> None:
+    """
+    Execute a command with given arguments.
+
+    Args:
+        command: The command name to execute
+        args: List of arguments for the command
+        is_interactive: Whether this is running in interactive mode
+    """
+    command_map = get_command_registry()
+
+    command_func = command_map.get(command)
+    if command_func:
+        try:
+            command_func(args)
+        except MenuExitException as e:
+            # In interactive mode, handle MenuExitException based on context
+            if is_interactive and e.is_main_menu:
+                # User pressed ESC in main menu, exit the program
+                sys.exit(0)
+            elif is_interactive:
+                # User pressed ESC in submenu, return to main menu (exit with success)
+                sys.exit(0)
+    else:
+        print(f"Unknown command: {command}")
+        help_command([])
+
+
 def main(argv: Optional[List[str]] = None):
     if argv is None:
         argv = sys.argv
@@ -1433,26 +1868,7 @@ def main(argv: Optional[List[str]] = None):
     # If arguments were provided directly, execute that command
     if len(argv) >= 2:
         command = argv[1]
-
-        # Map commands to their respective functions
-        command_map: Dict[str, Callable[[List[str]], None]] = {
-            "rebase": rebase_command,
-            "remote-ls": remote_ls_command,
-            "check": check_command,
-            "upgrade": upgrade_command,
-            "ls": ls_command,
-            "rollback": rollback_command,
-            "pin": pin_command,
-            "unpin": unpin_command,
-            "rm": rm_command,
-            "help": help_command,
-        }
-
-        if command in command_map:
-            command_map[command](argv[2:])
-        else:
-            print(f"Unknown command: {command}")
-            help_command([])
+        execute_command(command, argv[2:])
     else:
         # No command provided, enter menu loop for interactive use
         # Check if we're in a test environment to avoid infinite loops
@@ -1466,34 +1882,7 @@ def main(argv: Optional[List[str]] = None):
             if not command:
                 sys.exit(0)
 
-            # Map commands to their respective functions
-            command_map: Dict[str, Callable[[List[str]], None]] = {
-                "rebase": rebase_command,
-                "remote-ls": remote_ls_command,
-                "check": check_command,
-                "upgrade": upgrade_command,
-                "ls": ls_command,
-                "rollback": rollback_command,
-                "pin": pin_command,
-                "unpin": unpin_command,
-                "rm": rm_command,
-                "help": help_command,
-            }
-
-            if command in command_map:
-                try:
-                    command_map[command]([])
-                except MenuExitException as e:
-                    # In test mode, handle MenuExitException based on context
-                    if e.is_main_menu:
-                        # User pressed ESC in main menu, exit the program
-                        sys.exit(0)
-                    else:
-                        # User pressed ESC in submenu, return to main menu (exit with success)
-                        sys.exit(0)
-            else:
-                print(f"Unknown command: {command}")
-                help_command([])
+            execute_command(command, [], is_interactive=True)
         else:
             # Interactive menu loop
             while True:
@@ -1502,29 +1891,7 @@ def main(argv: Optional[List[str]] = None):
                     if not command:
                         sys.exit(0)
 
-                    # Map commands to their respective functions
-                    command_map: Dict[str, Callable[[List[str]], None]] = {
-                        "rebase": rebase_command,
-                        "remote-ls": remote_ls_command,
-                        "check": check_command,
-                        "upgrade": upgrade_command,
-                        "ls": ls_command,
-                        "rollback": rollback_command,
-                        "pin": pin_command,
-                        "unpin": unpin_command,
-                        "rm": rm_command,
-                        "help": help_command,
-                    }
-
-                    if command in command_map:
-                        try:
-                            command_map[command]([])
-                        except MenuExitException:
-                            # Continue the menu loop when MenuExitException is raised
-                            continue
-                    else:
-                        print(f"Unknown command: {command}")
-                        help_command([])
+                    execute_command(command, [], is_interactive=True)
 
                 except MenuExitException as e:
                     if e.is_main_menu:

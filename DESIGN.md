@@ -16,6 +16,7 @@ All modifications to this project, whether they involve code changes, feature ad
 ## Purpose
 
 This utility is designed to:
+
 - Simplify common rpm-ostree and ostree operations
 - Provide an alternative to memorizing complex commands
 - Offer interactive prompts for command selection using gum
@@ -26,40 +27,46 @@ This utility is designed to:
 ### Primary Commands
 
 #### `rebase <url>`
+
 - **Wraps**: `sudo rpm-ostree rebase <url>`
 - **Function**: Rebase the system to a specified container image URL
 - **Requires sudo**: Yes
-- **Interactive submenu**: When no `<url>` is specified, provides a submenu of common container URLs with number prefixes for direct selection:
-  - `1: ghcr.io/ublue-os/bazzite:stable`
-  - `2: ghcr.io/ublue-os/bazzite:testing`
-  - `3: ghcr.io/ublue-os/bazzite:unstable`
-  - `*4: ghcr.io/wombatfromhell/bazzite-nix:testing` (default option marked with *)
-  - `5: ghcr.io/wombatfromhell/bazzite-nix:stable`
-  - `6: ghcr.io/astrovm/amyos:latest`
+- **Interactive submenu**: When no `<url>` is specified, provides a submenu of common container URLs with arrow key navigation for selection:
+  - `ghcr.io/wombatfromhell/bazzite-nix:testing` (default option - first in list)
+  - `ghcr.io/wombatfromhell/bazzite-nix:stable`
+  - `ghcr.io/ublue-os/bazzite:stable`
+  - `ghcr.io/ublue-os/bazzite:testing`
+  - `ghcr.io/ublue-os/bazzite:unstable`
+  - `ghcr.io/astrovm/amyos:latest`
 - **Usage**: Users can navigate with arrow keys or select directly by number; press ESC to cancel
 
 #### `remote-ls <url>`
+
 - **Function**: List available tags for a container image from a remote registry
 - **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `OCIClient.get_all_tags()` to fetch tags from the public `tags/list` endpoint with pagination support by following Link headers. Tags are filtered to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags.
 - **Requires sudo**: No
 - **Interactive submenu**: When no `<url>` is specified, uses `show_remote_ls_submenu()` to display a submenu of common container URLs for tag listing, similar to the rebase command options
 
 #### `check`
+
 - **Wraps**: `rpm-ostree upgrade --check`
 - **Function**: Check for available updates without applying them
 - **Requires sudo**: No
 
 #### `upgrade`
+
 - **Wraps**: `sudo rpm-ostree upgrade`
 - **Function**: Upgrade the system to the latest available version
 - **Requires sudo**: Yes
 
 #### `ls`
+
 - **Wraps**: `rpm-ostree status -v`
 - **Function**: List deployments with detailed information
 - **Requires sudo**: No
 
 #### `rollback`
+
 - **Wraps**: `sudo rpm-ostree rollback`
 - **Function**: Roll back to the previous deployment
 - **Requires sudo**: Yes
@@ -67,19 +74,22 @@ This utility is designed to:
 ### Deployment Management Commands
 
 #### `pin <num>`
+
 - **Wraps**: `sudo ostree admin pin <num>`
 - **Function**: Pin a specific deployment by number to prevent automatic cleanup
 - **Requires sudo**: Yes
 - **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information (excluding already pinned deployments) that allows users to select which deployment to pin. The selection maps to the appropriate deployment index.
 
 #### `unpin <num>`
+
 - **Wraps**: `sudo ostree admin pin -u <num>`
 - **Function**: Unpin a specific deployment by number
 - **Requires sudo**: Yes
 - **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information (only showing already pinned deployments) that allows users to select which deployment to unpin. The selection maps to the appropriate deployment index.
 
 #### `rm <num>`
-- **Wraps**: `sudo ostree cleanup -r <num>`
+
+- **Wraps**: `sudo rpm-ostree cleanup -r <num>`
 - **Function**: Remove a specific deployment by number
 - **Requires sudo**: Yes
 - **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information that allows users to select which deployment to remove. The selection maps to the appropriate deployment index.
@@ -97,6 +107,7 @@ The submenu display functions (for non-TTY and gum-not-found scenarios) are now 
 ### Menu Navigation Behavior
 
 When using interactive menus, the utility supports intuitive navigation:
+
 - Pressing ESC in the main menu will exit the program
 - Pressing ESC in any submenu will return the user to the main menu
 - When ESC is pressed in a submenu (gum choose), a `MenuExitException(is_main_menu=False)` is raised
@@ -129,9 +140,32 @@ To reduce code duplication and improve maintainability, the codebase uses common
 - `run_gum_submenu()` - A generic function for displaying interactive menus with gum that handles both TTY and non-TTY contexts, as well as "gum not found" scenarios
 - `handle_command_with_submenu()` - A generic function for handling commands that can accept arguments or show submenus, reducing duplication in rebase, pin, unpin, and rm commands
 - `create_submenu_display_functions()` - A factory function that creates display functions for non-TTY and gum-not-found scenarios, reducing duplication across various submenu functions
+- `get_command_registry()` - A centralized registry for command mappings to eliminate duplicate mappings
+- `execute_command()` - A unified function to execute commands with proper error handling
+- `parse_command_argument()` - A function to handle argument parsing with submenu support
+- `get_error_message()` - A function to generate appropriate error messages
+- `extract_repository_from_url()` and `extract_context_from_url()` - Pure functions for URL parsing
+- `_parse_xx_yyyymmdd_format()` and `_parse_yyyymmdd_format()` - Pure functions for version parsing
+- `_context_filter_tags()` and `_deduplicate_tags_by_version()` - Pure functions for tag processing
+- `get_rpm_ostree_status_output()` - A function to isolate command execution from parsing logic
+- `is_deployment_line()`, `extract_deployment_index()`, `parse_deployment_details()`, and other parsing helpers - Functions to break down the complex deployment parsing logic
+- `_handle_gum_no_selection()` - A dedicated function to handle gum no-selection cases
+- `_process_response()` and `_make_request_with_token()` - Functions that separate HTTP request logic in OCIClient
+- `_create_date_sort_key()`, `_create_version_series_sort_key()`, `_create_context_date_sort_key()`, `_create_context_version_series_sort_key()`, `_create_alpha_sort_key()`, and `_create_context_alpha_sort_key()` - Specialized functions to break down complex version sorting
 - `CommandDefinition` - A data class that defines command properties and behavior, enabling centralized command registration and reducing duplication in command handling
 - `_create_version_sort_key()` - A consolidated function for tag version sorting that handles both basic and context-aware sorting, reducing duplication in OCIClient methods
 - `_parse_response_headers_and_body()` and `_extract_link_header()` - Utility functions in OCIClient to reduce duplication in HTTP response parsing
+- `get_command_registry()` - A centralized registry for command mappings to eliminate duplicate mappings
+- `execute_command()` - A unified function to execute commands with proper error handling
+- `parse_command_argument()` - A function to handle argument parsing with submenu support
+- `get_error_message()` - A function to generate appropriate error messages
+- `extract_repository_from_url()` and `extract_context_from_url()` - Pure functions for URL parsing
+- `_parse_xx_yyyymmdd_format()` and `_parse_yyyymmdd_format()` - Pure functions for version parsing
+- `_context_filter_tags()` and `_deduplicate_tags_by_version()` - Pure functions for tag processing
+- `get_rpm_ostree_status_output()` - A function to isolate command execution from parsing logic
+- `is_deployment_line()`, `extract_deployment_index()`, `parse_deployment_details()`, and other parsing helpers - Functions to break down the complex deployment parsing logic
+- `_handle_gum_no_selection()` - A dedicated function to handle gum no-selection cases
+- `_process_response()` and `_make_request_with_token()` - Functions that separate HTTP request logic in OCIClient
 
 ### Privilege Escalation
 
@@ -176,6 +210,7 @@ The `OCIClient` class provides functionality for interacting with OCI Container 
 The project follows a comprehensive testing strategy with three distinct test categories:
 
 ### Unit Tests (`test_units.py`)
+
 - Test individual functions in isolation
 - Use mocking to isolate the function under test
 - Focus on pure logic and error handling within each function
@@ -183,12 +218,14 @@ The project follows a comprehensive testing strategy with three distinct test ca
 - Located in `tests/test_units.py`
 
 ### Integration Tests (`test_integrations.py`)
+
 - Test how different functions work together
 - Validate interactions between modules/components
 - May involve testing integration with external tools like `gum`
 - Located in `tests/test_integrations.py`
 
 ### End-to-End Tests (`test_e2e.py`)
+
 - Test complete workflows and user journeys
 - Validate the main entry point and command flow
 - Simulate real usage scenarios from user input to function calls
@@ -213,6 +250,7 @@ The `conftest.py` file includes the following shared fixtures:
 - `mock_print`: Pre-configured mock for the print function
 
 Each test file still needs to import the necessary functions from the urh module, but they benefit from:
+
 - Centralized path setup (no need to repeat sys.path manipulation in each file)
 - Access to standardized fixtures defined in conftest.py
 - Cleaner test code with no duplicated fixture definitions
@@ -226,6 +264,7 @@ When modifying or adding tests to this project, developers must leverage the sha
 When writing tests that cover similar functionality with different input values, prefer pytest's parametrization feature rather than creating multiple discrete test functions. This approach reduces code duplication and makes test maintenance easier. Only create separate tests when the code concerns are fundamentally different.
 
 The test suite should leverage parametrization to consolidate similar test scenarios, such as:
+
 - Testing command functions with different input parameters
 - Testing error handling for various error conditions
 - Testing submenu functionality with different return values
