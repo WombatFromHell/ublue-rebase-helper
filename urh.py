@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import os
+import re
 from typing import List, Optional, Callable, Dict, Any, Tuple, Union
 
 # Define type aliases for our sorting keys
@@ -18,9 +19,16 @@ VersionSortKey = Union[DateVersionKey, AlphaVersionKey]
 
 
 class MenuExitException(Exception):
-    """Exception raised when ESC is pressed in a submenu to return to main menu."""
+    """Exception raised when ESC is pressed in a menu.
 
-    pass
+    Args:
+        is_main_menu: If True, indicates ESC was pressed in main menu (should exit program).
+                     If False, indicates ESC was pressed in submenu (should return to main menu).
+    """
+
+    def __init__(self, is_main_menu: bool = False):
+        self.is_main_menu = is_main_menu
+        super().__init__()
 
 
 class OCIClient:
@@ -113,27 +121,159 @@ class OCIClient:
             # Cache file doesn't exist, nothing to do.
             pass
 
-    def get_tags(self, token: str) -> Optional[Dict[str, Any]]:
+    def _parse_link_header(self, link_header: Optional[str]) -> Optional[str]:
         """
-        Get the tags for the repository using the provided token.
-        Implements a retry logic if the token is expired/invalid.
+        Parse the Link header to extract the next URL.
+        Example: Link: </v2/WombatFromHell/bazzite-nix/tags/list?last=1.2.0&n=200>; rel="next"
+
+        Args:
+            link_header: The raw Link header value
+
+        Returns:
+            The next URL if found, None otherwise
+        """
+        if not link_header:
+            return None
+
+        # Look for the next link in the Link header
+        # Pattern: </v2/...>; rel="next" or similar variations with spaces
+        # Using a comprehensive pattern to match various formats
+        # This pattern handles: '<url>; rel="next"' including possible spaces
+        next_match = re.search(
+            r'<\s*([^>]+?)\s*>\s*;\s*rel\s*=\s*["\']next["\']', link_header
+        )
+        if next_match:
+            return next_match.group(1)
+        return None
+
+    def get_all_tags(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Get all tags for the repository using the provided token with pagination.
+        Follows Link headers to get all tags until no more pages exist.
 
         Args:
             token: The OAuth2 token.
 
         Returns:
+            A dictionary containing all tags if successful, None otherwise.
+        """
+        # Use the full URL with protocol for the initial request
+        base_url = f"https://ghcr.io/v2/{self.repository}/tags/list"
+        initial_url = f"{base_url}?n=200"
+        all_tags: List[str] = []
+        next_url = initial_url
+
+        while next_url:
+            # Check if the next_url is a relative path (from Link header) or full URL
+            if next_url.startswith("/"):
+                # If it's a relative path, prepend the base URL
+                full_url = f"https://ghcr.io{next_url}"
+            else:
+                # If it's already a full URL, use as is
+                full_url = next_url
+
+            # Fetch a single page of tags using the shared method
+            result = self._fetch_single_page_tags(full_url, token)
+            if not result:
+                return None
+
+            # Extract tags and next URL from the result
+            tags_data = result["tags_data"]
+            link_header = result["link_header"]
+
+            # Get the next URL by parsing the Link header
+            next_url = (
+                self._parse_link_header(link_header)
+                if link_header is not None
+                else None
+            )
+
+            # Add tags to the collection
+            if "tags" in tags_data:
+                all_tags.extend(tags_data["tags"])
+
+        # Return all collected tags
+        return {"tags": all_tags}
+
+    def _parse_response_headers_and_body(self, response_text: str) -> Tuple[str, str]:
+        """
+        Parse headers and body from an HTTP response.
+
+        Args:
+            response_text: The raw response text from curl
+
+        Returns:
+            A tuple of (headers_part, body)
+        """
+        # Split headers and body (HTTP responses are separated by \r\n\r\n)
+        if "\r\n\r\n" in response_text:
+            headers_part, body = response_text.split("\r\n\r\n", 1)
+        elif "\n\n" in response_text:
+            # In test environments, newlines might not be \r\n
+            headers_part, body = response_text.split("\n\n", 1)
+        else:
+            # If no separate headers found, treat the entire output as response body
+            headers_part = ""
+            body = response_text
+
+        return headers_part, body
+
+    def _extract_link_header(self, headers_part: str) -> Optional[str]:
+        """
+        Extract the Link header from response headers.
+
+        Args:
+            headers_part: The headers part of the response
+
+        Returns:
+            The Link header value if found, None otherwise
+        """
+        link_header = None
+        if headers_part:
+            for line in headers_part.splitlines():
+                if line.lower().startswith("link:"):
+                    link_header = line[5:].strip()  # Remove 'Link:' and whitespace
+                    break
+        return link_header
+
+    def _fetch_single_page_tags(self, url: str, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch a single page of tags from the given URL with the provided token.
+        Implements a retry logic if the token is expired/invalid.
+
+        Args:
+            url: The URL to fetch tags from
+            token: The OAuth2 token to use for authentication
+
+        Returns:
             A dictionary containing the tags if successful, None otherwise.
         """
-        url = f"https://ghcr.io/v2/{self.repository}/tags/list?n=200"
+
+        def _process_response(stdout_text: str) -> Optional[Dict[str, Any]]:
+            # Parse headers and body from the response
+            headers_part, body = self._parse_response_headers_and_body(stdout_text)
+
+            # Find Link header in headers_part
+            link_header = self._extract_link_header(headers_part)
+
+            # Parse tags from the response body
+            try:
+                response_data = json.loads(body)
+                return {"tags_data": response_data, "link_header": link_header}
+            except json.JSONDecodeError as e:
+                print(f"Error parsing tags response: {e}")
+                print(f"Response body: {body}")
+                return None
 
         try:
             result = subprocess.run(
-                ["curl", "-s", "-H", f"Authorization: Bearer {token}", url],
+                ["curl", "-s", "-i", "-H", f"Authorization: Bearer {token}", url],
                 capture_output=True,
                 text=True,
                 check=True,
             )
-            return json.loads(result.stdout)
+
+            return _process_response(result.stdout)
 
         except subprocess.CalledProcessError as e:
             # Check if the failure was due to an invalid/expired token
@@ -150,6 +290,7 @@ class OCIClient:
                             [
                                 "curl",
                                 "-s",
+                                "-i",
                                 "-H",
                                 f"Authorization: Bearer {new_token}",
                                 url,
@@ -158,8 +299,11 @@ class OCIClient:
                             text=True,
                             check=True,
                         )
-                        print("Retry successful.")
-                        return json.loads(retry_result.stdout)
+
+                        result = _process_response(retry_result.stdout)
+                        if result:
+                            print("Retry successful.")
+                        return result
                     except subprocess.CalledProcessError as retry_e:
                         print(f"Retry also failed: {retry_e.stderr}")
                         return None
@@ -170,51 +314,37 @@ class OCIClient:
             print(f"Error parsing tags response: {e}")
             return None
 
-    def _parse_version_for_sorting(self, tag: str) -> VersionSortKey:
+    def get_tags(self, token: str) -> Optional[Dict[str, Any]]:
         """
-        Parse a tag to extract version components for proper sorting.
-        Handles format: [<prefix>-]<YYYY><MM><DD>[.<SUBVER>] where prefix might be 'testing-' or 'stable-'
+        Get the tags for the repository using the provided token.
+        Implements a retry logic if the token is expired/invalid.
 
         Args:
-            tag: The tag string to parse
+            token: The OAuth2 token.
 
         Returns:
-            A tuple that can be used for sorting, with the most significant components first
+            A dictionary containing the tags if successful, None otherwise.
         """
-        import re
+        # For backward compatibility, keep the original behavior with 200 tags
+        url = f"https://ghcr.io/v2/{self.repository}/tags/list?n=200"
 
-        # Remove prefix if present for date parsing, but keep original for other cases
-        clean_tag = tag
-        if tag.startswith("testing-"):
-            clean_tag = tag[8:]  # Remove "testing-" prefix
-        elif tag.startswith("stable-"):
-            clean_tag = tag[7:]  # Remove "stable-" prefix
-        elif tag.startswith("unstable-"):
-            clean_tag = tag[9:]  # Remove "unstable-" prefix
+        result = self._fetch_single_page_tags(url, token)
+        if result:
+            return result["tags_data"]
+        return None
 
-        # Extract date and subver from format YYYYMMDD[.SUBVER]
-        # Match pattern like: 20231201 or 20231201.2
-        match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
-        if match:
-            date_str = match.group(1)  # YYYYMMDD
-            subver_str = match.group(2)  # SUBVER if present
+    def _should_filter_tag(self, tag: str) -> bool:
+        """
+        Determine if a tag should be filtered out based on multiple criteria.
 
-            # Convert to integers for proper numeric comparison
-            year = int(date_str[:4])
-            month = int(date_str[4:6])
-            day = int(date_str[6:8])
-            subver = int(subver_str) if subver_str is not None else 0
+        Args:
+            tag: The tag to evaluate
 
-            # Return tuple with components in order of significance (descending)
-            # Using negative values to maintain descending order when sorting
-            # Use a high priority indicator to sort date-based versions first
-            return (-1, -year, -month, -day, -subver)
-        else:
-            # For tags that don't match the YYYYMMDD format, sort alphabetically in reverse
-            # This maintains backward compatibility with the old behavior
-            # To achieve reverse alphabetical order when sorting normally, return the negative first character
-            # followed by reversed tag to maintain reverse alphabetical order
-            return (0, tuple(-ord(c) for c in tag.lower()))
+        Returns:
+            True if the tag should be filtered out, False otherwise
+        """
+        # Use the common filtering function directly
+        return _should_filter_tag_common(tag)
 
     def _filter_and_sort_tags(
         self, tags_data: Optional[Dict[str, Any]]
@@ -237,37 +367,18 @@ class OCIClient:
 
         tags: List[str] = tags_data["tags"]
 
-        # Filter out SHA256 tags
-        filtered_tags: List[str] = []
-        for tag in tags:
-            # Skip if tag starts with sha256 prefix (general pattern)
-            if tag.lower().startswith("sha256-") or tag.lower().startswith("sha256:"):
-                continue
-            # Skip if tag looks like a hex hash (40-64 characters of hex)
-            if (
-                len(tag) >= 40
-                and len(tag) <= 64
-                and all(c in "0123456789abcdefABCDEF" for c in tag)
-            ):
-                continue
-            # Skip if tag looks like <hex-hash>
-            if tag.startswith("<") and tag.endswith(">"):
-                continue
-            # Skip tag aliases (both exact matches and those starting with the alias followed by a dot)
-            tag_lower = tag.lower()
-            if tag_lower in ["latest", "testing", "stable", "unstable"]:
-                continue
-            if any(
-                tag_lower.startswith(alias + ".")
-                for alias in ["latest", "testing", "stable", "unstable"]
-            ):
-                continue
-            filtered_tags.append(tag)
+        # Filter tags using the dedicated filtering function
+        filtered_tags: List[str] = [
+            tag for tag in tags if not self._should_filter_tag(tag)
+        ]
 
         # Sort tags by version in descending order (newest first)
-        # This uses our custom parsing function to handle the specific format
+        # This uses the consolidated parsing function to handle the specific format
         sorted_tags: List[str] = sorted(
-            filtered_tags, key=self._parse_version_for_sorting
+            filtered_tags,
+            key=lambda tag: _create_version_sort_key(
+                tag, include_context_priority=False
+            ),
         )
 
         # Limit to maximum 30 tags
@@ -291,7 +402,7 @@ class OCIClient:
             print("Could not obtain a token. Aborting.")
             return None
 
-        tags_data = self.get_tags(token)
+        tags_data = self.get_all_tags(token)
         return self._filter_and_sort_tags(tags_data)
 
     def get_raw_tags(self) -> Optional[Dict[str, Any]]:
@@ -307,7 +418,7 @@ class OCIClient:
             print("Could not obtain a token. Aborting.")
             return None
 
-        tags_data = self.get_tags(token)
+        tags_data = self.get_all_tags(token)
         return tags_data
 
 
@@ -321,6 +432,42 @@ def run_command(cmd: List[str]) -> int:
         return 1
 
 
+def create_submenu_display_functions(
+    data_source: Callable[[], List[str]],
+    non_tty_message: str,
+    gum_not_found_message: str,
+) -> Tuple[
+    Callable[[Callable[[str], Any]], None], Callable[[Callable[[str], Any]], None]
+]:
+    """
+    Factory function that creates the non-TTY and gum-not-found display functions for a submenu.
+
+    Args:
+        data_source: Function that returns the list of options to display
+        non_tty_message: Message to show when not in TTY context
+        gum_not_found_message: Message to show when gum is not found
+
+    Returns:
+        A tuple of (non_tty_func, gum_not_found_func)
+    """
+
+    def display_non_tty(print_func: Callable[[str], Any]) -> None:
+        print_func(non_tty_message)
+        options: List[str] = data_source()
+        for option in options:
+            print_func(f"{option}")
+        print_func("\nRun 'urh.py with a specific option.'")
+
+    def display_gum_not_found(print_func: Callable[[str], Any]) -> None:
+        print_func(gum_not_found_message)
+        options: List[str] = data_source()
+        for option in options:
+            print_func(f"{option}")
+        print_func("\nRun 'urh.py with a specific option.'")
+
+    return display_non_tty, display_gum_not_found
+
+
 def run_gum_submenu(
     options: List[str],
     header: str,
@@ -330,6 +477,7 @@ def run_gum_submenu(
     subprocess_run_func: Callable[..., Any] = subprocess.run,
     print_func: Callable[[str], Any] = print,
     no_selection_message: str = "No option selected.",
+    is_main_menu: bool = False,
 ) -> Optional[str]:
     """
     Generic function to run a gum submenu with specified options.
@@ -384,8 +532,8 @@ def run_gum_submenu(
                         # avoid printing fallback message on ESC
                         sys.stdout.write("\033[F\033[K")
                         sys.stdout.flush()
-                        # In normal mode, raise exception to return to main menu
-                        raise MenuExitException()
+                        # In normal mode, raise exception with context
+                        raise MenuExitException(is_main_menu=is_main_menu)
                 # For other errors, return None
                 return None
         except FileNotFoundError:
@@ -469,45 +617,30 @@ def get_container_options() -> List[str]:
     ]
 
 
-def show_commands_non_tty(print_func: Callable[[str], Any] = print) -> None:
-    """Show command list when not in TTY context."""
-    print_func("Not running in interactive mode. Available commands:")
-    for cmd_desc in get_commands_with_descriptions():
-        print_func(f"  {cmd_desc}")
-    print_func("\nRun 'urh.py help' for more information.")
-
-
-def show_commands_gum_not_found(print_func: Callable[[str], Any] = print) -> None:
-    """Show command list when gum is not found."""
-    print_func("gum not found. Available commands:")
-    for cmd_desc in get_commands_with_descriptions():
-        print_func(f"  {cmd_desc}")
-    print_func("\nRun 'urh.py help' for more information.")
-
-
 def show_command_menu(
     is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
     subprocess_run_func: Callable[..., Any] = subprocess.run,
     print_func: Callable[[str], Any] = print,
 ) -> Optional[str]:
     """Show a menu of available commands using gum."""
-
-    def display_commands_non_tty(func: Callable[[str], Any]) -> None:
-        show_commands_non_tty(func)
-
-    def display_commands_gum_not_found(func: Callable[[str], Any]) -> None:
-        show_commands_gum_not_found(func)
+    data_source = get_commands_with_descriptions
+    display_non_tty, display_gum_not_found = create_submenu_display_functions(
+        data_source,
+        "Not running in interactive mode. Available commands:",
+        "gum not found. Available commands:",
+    )
 
     options = get_commands_with_descriptions()
     result = run_gum_submenu(
         options,
         "Select command (ESC to cancel):",
-        display_commands_non_tty,
-        display_commands_gum_not_found,
+        display_non_tty,
+        display_gum_not_found,
         is_tty_func,
         subprocess_run_func,
         print_func,
         "No command selected.",
+        is_main_menu=True,
     )
 
     if result:
@@ -517,45 +650,25 @@ def show_command_menu(
     return result
 
 
-def show_container_options_non_tty(print_func: Callable[[str], Any] = print) -> None:
-    """Show container options when not in TTY context."""
-    print_func("Available container URLs:")
-    options = get_container_options()
-    for _, option in enumerate(options, 1):
-        print_func(f"{option}")
-    print_func("\nRun 'urh.py rebase <url>' with a specific URL.")
-
-
-def show_container_options_gum_not_found(
-    print_func: Callable[[str], Any] = print,
-) -> None:
-    """Show container options when gum is not found."""
-    print_func("gum not found. Available container URLs:")
-    options = get_container_options()
-    for _, option in enumerate(options, 1):
-        print_func(f"{option}")
-    print_func("\nRun 'urh.py rebase <url>' with a specific URL.")
-
-
 def show_rebase_submenu(
     is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
     subprocess_run_func: Callable[..., Any] = subprocess.run,
     print_func: Callable[[str], Any] = print,
 ) -> Optional[str]:
     """Show a submenu of common container URLs using gum."""
+    data_source = get_container_options
+    display_non_tty, display_gum_not_found = create_submenu_display_functions(
+        data_source,
+        "Available container URLs:",
+        "gum not found. Available container URLs:",
+    )
 
-    def display_container_options_non_tty(func: Callable[[str], Any]) -> None:
-        show_container_options_non_tty(func)
-
-    def display_container_options_gum_not_found(func: Callable[[str], Any]) -> None:
-        show_container_options_gum_not_found(func)
-
-    options = get_container_options()
+    options = data_source()
     return run_gum_submenu(
         options,
         "Select container image (ESC to cancel):",
-        display_container_options_non_tty,
-        display_container_options_gum_not_found,
+        display_non_tty,
+        display_gum_not_found,
         is_tty_func,
         subprocess_run_func,
         print_func,
@@ -568,19 +681,19 @@ def show_remote_ls_submenu(
     print_func: Callable[[str], Any] = print,
 ) -> Optional[str]:
     """Show a submenu of common container URLs for remote-ls using gum."""
+    data_source = get_container_options
+    display_non_tty, display_gum_not_found = create_submenu_display_functions(
+        data_source,
+        "Available container URLs:",
+        "gum not found. Available container URLs:",
+    )
 
-    def display_container_options_non_tty(func: Callable[[str], Any]) -> None:
-        show_container_options_non_tty(func)
-
-    def display_container_options_gum_not_found(func: Callable[[str], Any]) -> None:
-        show_container_options_gum_not_found(func)
-
-    options = get_container_options()
+    options = data_source()
     return run_gum_submenu(
         options,
         "Select container image to list tags (ESC to cancel):",
-        display_container_options_non_tty,
-        display_container_options_gum_not_found,
+        display_non_tty,
+        display_gum_not_found,
         is_tty_func,
         subprocess_run_func,
         print_func,
@@ -687,6 +800,79 @@ def remote_ls_command(
     sys.exit(0)
 
 
+def _should_filter_tag_common(tag: str) -> bool:
+    """
+    Common function to determine if a tag should be filtered out based on multiple criteria.
+    This is a standalone function that can be used by both OCIClient and context-aware filtering.
+
+    Args:
+        tag: The tag to evaluate
+
+    Returns:
+        True if the tag should be filtered out, False otherwise
+    """
+    tag_lower = tag.lower()
+
+    # Skip if tag starts with sha256 prefix (general pattern)
+    if tag_lower.startswith("sha256-") or tag_lower.startswith("sha256:"):
+        return True
+
+    # Skip if tag looks like a hex hash (40-64 characters of hex)
+    if (
+        len(tag) >= 40
+        and len(tag) <= 64
+        and all(c in "0123456789abcdefABCDEF" for c in tag)
+    ):
+        return True
+
+    # Skip if tag looks like <hex-hash>
+    if tag.startswith("<") and tag.endswith(">"):
+        return True
+
+    # Skip tag aliases (both exact matches and those starting with the alias followed by a dot)
+    if tag_lower in ["latest", "testing", "stable", "unstable"]:
+        return True
+    if any(
+        tag_lower.startswith(alias + ".")
+        for alias in ["latest", "testing", "stable", "unstable"]
+    ):
+        return True
+
+    # Skip major version patterns like "42", "43", etc. (standalone major versions)
+    if tag_lower.isdigit() and len(tag_lower) <= 2:
+        return True
+
+    # Skip major version alias patterns like "unstable-43", "testing-42", "stable-43", etc.
+    # These are aliases for actual version tags like "unstable-43.20251030"
+    # But don't skip patterns like "unstable-43.20251030" (major version with date) or "unstable-20231001" (date format)
+    for alias in ["latest", "testing", "stable", "unstable"]:
+        if tag_lower.startswith(alias + "-"):
+            after_prefix = tag_lower[len(alias) + 1 :]
+            parts = after_prefix.split(".")
+            first_part = parts[0]
+            # Check if it's a simple number with no more parts after (like "43" from "unstable-43")
+            # Major versions are typically short numbers (1-2 digits) with no additional parts
+            if (
+                first_part.isdigit() and len(first_part) <= 2 and len(parts) == 1
+            ):  # Major version numbers are typically 1-2 digits with no additional parts
+                return True
+
+    # Skip version suffix patterns like "42-testing", "42-stable", "42-unstable"
+    # These are aliases where a major version has a suffix
+    suffix_patterns = ["-testing", "-stable", "-unstable"]
+    for suffix in suffix_patterns:
+        if tag_lower.endswith(suffix):
+            prefix_part = tag_lower[: -len(suffix)]  # Remove the suffix
+            if prefix_part.isdigit() and len(prefix_part) <= 2:  # Major version number
+                return True
+
+    # Skip signature tags (common convention)
+    if tag.endswith(".sig"):
+        return True
+
+    return False
+
+
 def _context_aware_filter_and_sort(
     tags: List[str], url_context: Optional[str] = None
 ) -> List[str]:
@@ -701,35 +887,10 @@ def _context_aware_filter_and_sort(
         Filtered, sorted, and limited (max 30) list of tags
     """
 
-    # First filter out invalid tags (SHA256, aliases, signatures)
-    filtered_tags: List[str] = []
-    for tag in tags:
-        # Skip if tag starts with sha256 prefix (general pattern)
-        if tag.lower().startswith("sha256-") or tag.lower().startswith("sha256:"):
-            continue
-        # Skip if tag looks like a hex hash (40-64 characters of hex)
-        if (
-            len(tag) >= 40
-            and len(tag) <= 64
-            and all(c in "0123456789abcdefABCDEF" for c in tag)
-        ):
-            continue
-        # Skip if tag looks like <hex-hash>
-        if tag.startswith("<") and tag.endswith(">"):
-            continue
-        # Skip tag aliases (both exact matches and those starting with the alias followed by a dot)
-        tag_lower = tag.lower()
-        if tag_lower in ["latest", "testing", "stable", "unstable"]:
-            continue
-        if any(
-            tag_lower.startswith(alias + ".")
-            for alias in ["latest", "testing", "stable", "unstable"]
-        ):
-            continue
-        # Skip signature tags (common convention)
-        if tag.endswith(".sig"):
-            continue
-        filtered_tags.append(tag)
+    # First filter out invalid tags using the common filtering logic
+    filtered_tags: List[str] = [
+        tag for tag in tags if not _should_filter_tag_common(tag)
+    ]
 
     if url_context:
         # If URL has a tag context (like :testing or :stable), only show tags with that prefix
@@ -745,7 +906,9 @@ def _context_aware_filter_and_sort(
         # Sort by context-aware sorting function
         sorted_tags: List[str] = sorted(
             context_filtered_tags,
-            key=lambda t: _parse_version_for_context_aware_sorting(t, url_context),
+            key=lambda t: _create_version_sort_key(
+                t, url_context, include_context_priority=True
+            ),
         )
     else:
         # When no context specified, deduplicate by extracting version information
@@ -765,7 +928,8 @@ def _context_aware_filter_and_sort(
 
         # Use basic date-based sorting without preferencing prefixes
         sorted_tags: List[str] = sorted(
-            unique_tags, key=lambda t: _parse_version_for_basic_sorting(t)
+            unique_tags,
+            key=lambda t: _create_version_sort_key(t, include_context_priority=False),
         )
 
     # Limit to maximum 30 tags
@@ -827,37 +991,41 @@ def _should_replace_tag(existing_tag: str, new_tag: str) -> bool:
         return False
 
 
-def _parse_version_for_context_aware_sorting(
-    tag: str, url_context: str
-) -> VersionSortKey:
+def _extract_prefix_and_clean_tag(tag: str) -> Tuple[Optional[str], str]:
     """
-    Parse tag for context-aware sorting where tags matching the URL context are prioritized.
+    Extract the prefix (if any) and clean tag without prefix.
 
     Args:
-        tag: The tag to parse
-        url_context: The context from the URL (e.g., "testing", "stable")
+        tag: The original tag
 
     Returns:
-        A tuple for sorting that prioritizes context-matching tags
+        A tuple of (prefix, clean_tag) where prefix is None if no prefix exists
+    """
+    if tag.startswith("testing-"):
+        return "testing", tag[8:]  # Remove "testing-" prefix
+    elif tag.startswith("stable-"):
+        return "stable", tag[7:]  # Remove "stable-" prefix
+    elif tag.startswith("unstable-"):
+        return "unstable", tag[9:]  # Remove "unstable-" prefix
+    else:
+        return None, tag
+
+
+def _parse_version_components(
+    clean_tag: str,
+) -> Optional[Tuple[Optional[int], int, int, int, int]]:
+    """
+    Parse version components from a clean tag (without prefix).
+
+    Args:
+        clean_tag: Tag without any prefix
+
+    Returns:
+        A tuple of (version_series, year, month, day, subver) or None if no match
     """
     import re
 
-    # Remove prefix if present for date parsing
-    clean_tag = tag
-    tag_prefix = None
-    if tag.startswith("testing-"):
-        tag_prefix = "testing"
-        clean_tag = tag[8:]  # Remove "testing-" prefix
-    elif tag.startswith("stable-"):
-        tag_prefix = "stable"
-        clean_tag = tag[7:]  # Remove "stable-" prefix
-    elif tag.startswith("unstable-"):
-        tag_prefix = "unstable"
-        clean_tag = tag[9:]  # Remove "unstable-" prefix
-
-    # Extract version and date from format XX.YYYYMMDD[.SUBVER] where XX is a version series
-    # Also handle format YYYYMMDD[.SUBVER]
-    # First try XX.YYYYMMDD[.SUBVER] format
+    # Try XX.YYYYMMDD[.SUBVER] format first
     match = re.match(r"^(\d+)\.(\d{8})(?:\.(\d+))?$", clean_tag)
     if match:
         version_series_str = match.group(1)  # XX
@@ -871,117 +1039,107 @@ def _parse_version_for_context_aware_sorting(
         day = int(date_str[6:8])
         subver = int(subver_str) if subver_str is not None else 0
 
-        # If the tag prefix matches the URL context, give it higher priority
-        # This means testing- prefixed tags will sort first if URL has :testing
-        context_priority = 0 if tag_prefix == url_context else 1
+        return version_series, year, month, day, subver
 
-        # Return tuple with components: context priority combined with version series (descending), then date (descending), then subver (descending)
-        return (context_priority * 10000 - version_series, -year, -month, -day, -subver)
-    else:
-        # Try YYYYMMDD[.SUBVER] format
-        match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
-        if match:
-            date_str = match.group(1)  # YYYYMMDD
-            subver_str = match.group(2)  # SUBVER if present
+    # Try YYYYMMDD[.SUBVER] format
+    match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
+    if match:
+        date_str = match.group(1)  # YYYYMMDD
+        subver_str = match.group(2)  # SUBVER if present
 
-            # Convert to integers for proper numeric comparison
-            year = int(date_str[:4])
-            month = int(date_str[4:6])
-            day = int(date_str[6:8])
-            subver = int(subver_str) if subver_str is not None else 0
+        # Convert to integers for proper numeric comparison
+        year = int(date_str[:4])
+        month = int(date_str[4:6])
+        day = int(date_str[6:8])
+        subver = int(subver_str) if subver_str is not None else 0
 
-            # If the tag prefix matches the URL context, give it higher priority
-            # This means testing- prefixed tags will sort first if URL has :testing
+        return None, year, month, day, subver  # version_series is None for this format
+
+    return None  # No match for known formats
+
+
+def _create_version_sort_key(
+    tag: str, url_context: Optional[str] = None, include_context_priority: bool = False
+) -> VersionSortKey:
+    """
+    Create a sort key for a tag with optional context priority.
+    This maintains backward compatibility with the original sorting behavior.
+
+    Args:
+        tag: The tag to create a sort key for
+        url_context: The context from the URL (e.g., "testing", "stable")
+        include_context_priority: Whether to prioritize context-matching tags
+
+    Returns:
+        A tuple that can be used for sorting
+    """
+    # Extract prefix and clean tag
+    tag_prefix, clean_tag = _extract_prefix_and_clean_tag(tag)
+
+    # Try to parse version components
+    version_components = _parse_version_components(clean_tag)
+
+    if version_components:
+        version_series, year, month, day, subver = version_components
+
+        if include_context_priority and url_context:
+            # Context priority: 0 if matching context, 1 otherwise
             context_priority = 0 if tag_prefix == url_context else 1
 
-            # Return tuple with components: context priority combined with -10000 as base, then date (descending), then subver (descending)
-            return (
-                context_priority * 10000 - 10000,
-                -year,
-                -month,
-                -day,
-                -subver,
-            )  # -10000 ensures date-only tags sort lower than XX.YYYYMMDD format
+            if version_series is not None:
+                # XX.YYYYMMDD[.SUBVER] format
+                # Return tuple with context priority combined with version series (descending), then date (descending), then subver (descending)
+                return (
+                    context_priority * 10000 - version_series,
+                    -year,
+                    -month,
+                    -day,
+                    -subver,
+                )
+            else:
+                # YYYYMMDD[.SUBVER] format - this should get priority -1 to match original
+                # Return tuple with context priority combined with base -1, then date (descending), then subver (descending)
+                return (
+                    -1,  # Original behavior: -1 for date-based versions
+                    -year,
+                    -month,
+                    -day,
+                    -subver,
+                )
         else:
-            # For tags that don't match the expected format, use reverse alphabetical
-            # with context priority still applying
+            # No context priority - regular version sorting
+            if version_series is not None:
+                # XX.YYYYMMDD[.SUBVER] format
+                return (
+                    -10000 - version_series,  # Keep this as is
+                    -year,
+                    -month,
+                    -day,
+                    -subver,
+                )
+            else:
+                # YYYYMMDD[.SUBVER] format - should get priority -1 to match original behavior
+                return (
+                    -1,  # Original behavior: -1 for date-based versions
+                    -year,
+                    -month,
+                    -day,
+                    -subver,
+                )  # -1 matches the original priority for date-based tags
+    else:
+        # For tags that don't match the expected format, use reverse alphabetical
+        if include_context_priority and url_context:
             context_priority = 0 if tag_prefix == url_context else 1
             return (
                 context_priority * 10000 - 20000,
                 tuple(-ord(c) for c in tag.lower()),
-            )  # -20000 ensures non-matching format tags sort lowest
-
-
-def _parse_version_for_basic_sorting(tag: str) -> VersionSortKey:
-    """
-    Parse tag for basic sorting (no context prioritization).
-
-    Args:
-        tag: The tag to parse
-
-    Returns:
-        A tuple for sorting without context consideration
-    """
-    import re
-
-    # Remove prefix if present for date parsing
-    clean_tag = tag
-    if tag.startswith("testing-"):
-        clean_tag = tag[8:]  # Remove "testing-" prefix
-    elif tag.startswith("stable-"):
-        clean_tag = tag[7:]  # Remove "stable-" prefix
-    elif tag.startswith("unstable-"):
-        clean_tag = tag[9:]  # Remove "unstable-" prefix
-
-    # Extract version and date from format XX.YYYYMMDD[.SUBVER] where XX is a version series
-    # Also handle format YYYYMMDD[.SUBVER]
-    # First try XX.YYYYMMDD[.SUBVER] format
-    match = re.match(r"^(\d+)\.(\d{8})(?:\.(\d+))?$", clean_tag)
-    if match:
-        version_series_str = match.group(1)  # XX
-        date_str = match.group(2)  # YYYYMMDD
-        subver_str = match.group(3)  # SUBVER if present
-
-        # Convert to integers for proper numeric comparison
-        version_series = int(version_series_str)
-        year = int(date_str[:4])
-        month = int(date_str[4:6])
-        day = int(date_str[6:8])
-        subver = int(subver_str) if subver_str is not None else 0
-
-        # Return tuple with components: then version series (descending), then date (descending), then subver (descending)
-        # Use -10000 as base to distinguish from other formats
-        return (
-            -10000 - version_series,
-            -year,
-            -month,
-            -day,
-            -subver,
-        )  # -10000 to distinguish from other formats
-    else:
-        # Try YYYYMMDD[.SUBVER] format
-        match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
-        if match:
-            date_str = match.group(1)  # YYYYMMDD
-            subver_str = match.group(2)  # SUBVER if present
-
-            # Convert to integers for proper numeric comparison
-            year = int(date_str[:4])
-            month = int(date_str[4:6])
-            day = int(date_str[6:8])
-            subver = int(subver_str) if subver_str is not None else 0
-
-            # Return tuple with date components (descending) for date-based sorting
-            return (
-                -20000,
-                -year,
-                -month,
-                -day,
-                -subver,
-            )  # -20000 to distinguish from XX.YYYYMMDD format and other formats
+            )
         else:
-            # For tags that don't match the expected format, use reverse alphabetical
-            return (-30000, tuple(-ord(c) for c in tag.lower()))
+            # For non-date formats, use reverse alphabetical order (same as original for non-matching)
+            return (
+                0,
+                tuple(-ord(c) for c in tag.lower()),
+            )  # 0 for non-matching formats like original
 
 
 def check_command(args: List[str]):
@@ -1175,31 +1333,28 @@ def show_deployment_submenu(
         options.append(option_text)
         deployment_map[option_text] = deployment["index"]
 
-    def display_deployments_non_tty(func: Callable[[str], Any]) -> None:
-        func("Available deployments:")
+    # Create deployment data source function for the abstraction
+    def get_deployment_options() -> List[str]:
+        result: List[str] = []
         for deployment in deployments:
             version_info = (
                 deployment["version"] if deployment["version"] else "Unknown Version"
             )
             pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
-            func(f"  {deployment['index']}: {version_info}{pin_status}")
-        func("\nRun with deployment number directly (e.g., urh.py rm 0).")
+            result.append(f"  {deployment['index']}: {version_info}{pin_status}")
+        return result
 
-    def display_deployments_gum_not_found(func: Callable[[str], Any]) -> None:
-        func("gum not found. Available deployments:")
-        for deployment in deployments:
-            version_info = (
-                deployment["version"] if deployment["version"] else "Unknown Version"
-            )
-            pin_status = f" [Pinned: {'Yes' if deployment['pinned'] else 'No'}]"
-            func(f"  {deployment['index']}: {version_info}{pin_status}")
-        func("\nRun with deployment number directly (e.g., urh.py rm 0).")
+    display_non_tty, display_gum_not_found = create_submenu_display_functions(
+        get_deployment_options,
+        "Available deployments:",
+        "gum not found. Available deployments:",
+    )
 
     result_str = run_gum_submenu(
         options,
         "Select deployment (ESC to cancel):",
-        display_deployments_non_tty,
-        display_deployments_gum_not_found,
+        display_non_tty,
+        display_gum_not_found,
         is_tty_func,
         subprocess_run_func,
         print_func,
@@ -1249,16 +1404,27 @@ def help_command(args: List[str], print_func: Callable[[str], Any] = print) -> N
     print_func("Usage: urh.py <command> [args]")
     print_func("")
     print_func("Commands:")
+    print_func("  check            - Check for available updates")
+    print_func("  help             - Show this help message")
+    print_func("  ls               - List deployments with details")
+    print_func("  pin <num>        - Pin a deployment")
     print_func("  rebase <url>     - Rebase to a container image")
     print_func("  remote-ls <url>  - List available tags for a container image")
-    print_func("  check            - Check for available updates")
-    print_func("  upgrade          - Upgrade to the latest version")
-    print_func("  ls               - List deployments with details")
-    print_func("  rollback         - Roll back to the previous deployment")
-    print_func("  pin <num>        - Pin a deployment")
-    print_func("  unpin <num>      - Unpin a deployment")
     print_func("  rm <num>         - Remove a deployment")
-    print_func("  help             - Show this help message")
+    print_func("  rollback         - Roll back to the previous deployment")
+    print_func("  unpin <num>      - Unpin a deployment")
+    print_func("  upgrade          - Upgrade to the latest version")
+
+
+def execute_simple_command(command_parts: List[str]) -> None:
+    """Execute a simple command with no arguments needed."""
+    sys.exit(run_command(command_parts))
+
+
+def execute_command_with_args(command_parts: List[str], args: List[str]) -> None:
+    """Execute a command with additional arguments."""
+    cmd = command_parts + args
+    sys.exit(run_command(cmd))
 
 
 def main(argv: Optional[List[str]] = None):
@@ -1318,9 +1484,14 @@ def main(argv: Optional[List[str]] = None):
             if command in command_map:
                 try:
                     command_map[command]([])
-                except MenuExitException:
-                    # In test mode, MenuExitException is caught and handled
-                    sys.exit(0)
+                except MenuExitException as e:
+                    # In test mode, handle MenuExitException based on context
+                    if e.is_main_menu:
+                        # User pressed ESC in main menu, exit the program
+                        sys.exit(0)
+                    else:
+                        # User pressed ESC in submenu, return to main menu (exit with success)
+                        sys.exit(0)
             else:
                 print(f"Unknown command: {command}")
                 help_command([])
@@ -1356,9 +1527,13 @@ def main(argv: Optional[List[str]] = None):
                         print(f"Unknown command: {command}")
                         help_command([])
 
-                except MenuExitException:
-                    # User pressed ESC to return to main menu, continue the loop
-                    continue
+                except MenuExitException as e:
+                    if e.is_main_menu:
+                        # User pressed ESC in main menu, exit the program
+                        sys.exit(0)
+                    else:
+                        # User pressed ESC in submenu, return to main menu (continue loop)
+                        continue
 
 
 if __name__ == "__main__":

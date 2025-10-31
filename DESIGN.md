@@ -40,7 +40,7 @@ This utility is designed to:
 
 #### `remote-ls <url>`
 - **Function**: List available tags for a container image from a remote registry
-- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `GCRClient.get_tags()` to fetch tags from the public `tags/list` endpoint, with tags filtered to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags.
+- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `OCIClient.get_all_tags()` to fetch tags from the public `tags/list` endpoint with pagination support by following Link headers. Tags are filtered to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags.
 - **Requires sudo**: No
 - **Interactive submenu**: When no `<url>` is specified, uses `show_remote_ls_submenu()` to display a submenu of common container URLs for tag listing, similar to the rebase command options
 
@@ -92,13 +92,15 @@ When no command is provided, the utility uses gum to display an interactive menu
 
 For commands that require submenu functionality (like `rebase`), the utility uses gum with proper subprocess configuration to ensure the interactive UI is displayed correctly. The subprocess must capture stdout to receive user selections, but stderr must not be captured to allow the gum interface to be visible in TTY contexts.
 
+The submenu display functions (for non-TTY and gum-not-found scenarios) are now created using the `create_submenu_display_functions()` factory function, which reduces code duplication across different submenu types (command menu, container URL selection, deployment selection).
+
 ### Menu Navigation Behavior
 
 When using interactive menus, the utility supports intuitive navigation:
 - Pressing ESC in the main menu will exit the program
 - Pressing ESC in any submenu will return the user to the main menu
-- When ESC is pressed in a submenu (gum choose), a special `MenuExitException` is raised
-- When ESC is pressed in the main menu (gum choose), a special `MenuExitException` is raised
+- When ESC is pressed in a submenu (gum choose), a `MenuExitException(is_main_menu=False)` is raised
+- When ESC is pressed in the main menu (gum choose), a `MenuExitException(is_main_menu=True)` is raised
 - These exceptions are caught by the main menu loop, which then either exits the program (main menu) or redisplays the main menu (submenus)
 - This provides a consistent user experience where ESC acts as a "back" function in submenus and "exit" in the main menu
 
@@ -107,6 +109,8 @@ When using interactive menus, the utility supports intuitive navigation:
 ### Command Execution
 
 All commands are executed using `subprocess.run()` with proper error handling. The utility returns the exit code from the underlying commands to maintain proper exit status behavior.
+
+Commands are now defined using a centralized command registry (`get_command_registry()`) which maps command names to their definitions (including description, sudo requirement, argument parser, submenu function, and command builder). This approach reduces duplication and makes it easier to add new commands.
 
 ### Type Safety Requirements
 
@@ -124,6 +128,10 @@ To reduce code duplication and improve maintainability, the codebase uses common
 
 - `run_gum_submenu()` - A generic function for displaying interactive menus with gum that handles both TTY and non-TTY contexts, as well as "gum not found" scenarios
 - `handle_command_with_submenu()` - A generic function for handling commands that can accept arguments or show submenus, reducing duplication in rebase, pin, unpin, and rm commands
+- `create_submenu_display_functions()` - A factory function that creates display functions for non-TTY and gum-not-found scenarios, reducing duplication across various submenu functions
+- `CommandDefinition` - A data class that defines command properties and behavior, enabling centralized command registration and reducing duplication in command handling
+- `_create_version_sort_key()` - A consolidated function for tag version sorting that handles both basic and context-aware sorting, reducing duplication in OCIClient methods
+- `_parse_response_headers_and_body()` and `_extract_link_header()` - Utility functions in OCIClient to reduce duplication in HTTP response parsing
 
 ### Privilege Escalation
 
@@ -134,6 +142,21 @@ Commands that modify the system state require elevated privileges using `sudo`. 
 - Invalid deployment numbers are caught and reported with user-friendly error messages
 - Missing arguments result in usage information being displayed
 - Command not found errors are caught and reported appropriately
+
+### OCIClient Implementation Details
+
+The `OCIClient` class provides functionality for interacting with OCI Container Registries such as ghcr.io:
+
+- **Token Management**: Uses OAuth2 authentication with token caching to `/tmp/` using a repository-specific filename
+- **Pagination Support**: Implements Link header following to retrieve all tags beyond the initial 200 limit by parsing Link headers like `Link: </v2/user/repo/tags/list?last=tag_value&n=200>; rel="next"` and continuing until no more next links are present
+- **Tag Processing**: Includes filtering, sorting, and deduplication logic for container image tags
+- **Error Handling**: Includes retry mechanisms for expired/invalid tokens
+- **Code Reusability**: Implements the DRY principle through shared methods:
+  - `_fetch_single_page_tags()`: Handles authenticated requests, response parsing, and token refresh retry logic for both single-page requests (`get_tags`) and paginated requests (`get_all_tags`)
+  - Shared version parsing helper functions: `_extract_prefix_and_clean_tag()` and `_parse_version_components()` to avoid duplication in sorting functions
+  - Consolidated version sorting with `_create_version_sort_key()` function that handles both basic and context-aware sorting
+  - Response parsing utilities `_parse_response_headers_and_body()` and `_extract_link_header()` to eliminate duplication in HTTP response processing
+- **Architecture**: Uses a shared private method to eliminate code duplication between `get_tags()` and `get_all_tags()` methods, with `get_tags()` handling single-page requests and `get_all_tags()` using the shared method in its pagination loop
 
 ## Dependencies
 
