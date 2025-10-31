@@ -324,3 +324,166 @@ class TestShowDeploymentSubmenuIntegration:
             filter_func=pinned_filter,
         )
         assert result == 1  # Should return the index of the selected pinned deployment
+
+
+class TestTOMLFilterRulesIntegration:
+    """Integration tests for TOML filter rules and specific repository handling."""
+
+    def test_astrovm_amyos_latest_context_filtering(self, mocker: MockerFixture):
+        """Test that astrovm/amyos with :latest context properly filters to YYYYMMDD format tags."""
+        from urh import TOMLFilterRules
+
+        # Create filter rules for astrovm/amyos repository
+        rules = TOMLFilterRules("astrovm/amyos")
+
+        # Test with raw tags that include latest. format tags that should be transformed
+        raw_tags = [
+            "latest.20251031",  # Should transform to 20251031 and be preserved for :latest context
+            "latest.20251030",  # Should transform to 20251030 and be preserved for :latest context
+            "latest.20251029",  # Should transform to 20251029 and be preserved for :latest context
+            "stable-42.20250610",  # Should be filtered out in :latest context
+            "42.20250610",  # Should be filtered out in :latest context
+            "latest.",  # Should be filtered out by general filter
+            "latest.abc",  # Should be filtered out by general filter
+        ]
+
+        # Apply context-aware filtering for 'latest' context
+        result = rules.context_aware_filter_and_sort(raw_tags, "latest")
+
+        # Verify that only YYYYMMDD format tags from transformed latest.YYYYMMDD are returned
+        expected_tags = ["20251031", "20251030", "20251029"]
+        assert result == expected_tags, f"Expected {expected_tags}, got {result}"
+
+    def test_astrovm_amyos_latest_context_with_duplicates(self, mocker: MockerFixture):
+        """Test that astrovm/amyos with :latest context properly handles duplicates."""
+        from urh import TOMLFilterRules
+
+        # Create filter rules for astrovm/amyos repository
+        rules = TOMLFilterRules("astrovm/amyos")
+
+        # Test with tags that could create duplicates: both original YYYYMMDD and latest.YYYYMMDD
+        raw_tags = [
+            "latest.20251031",  # Should transform to 20251031
+            "20251031",  # Already in YYYYMMDD format - potential duplicate
+            "latest.20251030",  # Should transform to 20251030
+            "20251030",  # Already in YYYYMMDD format - potential duplicate
+            "latest.20251029",  # Should transform to 20251029
+            "20251028",  # Should be kept (no duplicate)
+        ]
+
+        # Apply context-aware filtering for 'latest' context
+        result = rules.context_aware_filter_and_sort(raw_tags, "latest")
+
+        # Verify that duplicates are properly handled and only unique tags are returned
+        # Should contain each date only once: 20251031, 20251030, 20251029, 20251028
+        expected_tags = ["20251031", "20251030", "20251029", "20251028"]
+        assert len(result) == len(expected_tags), (
+            f"Expected {len(expected_tags)} tags, got {len(result)}"
+        )
+        for tag in expected_tags:
+            assert tag in result, f"Expected tag {tag} not found in result {result}"
+
+    def test_astrovm_amyos_non_latest_context_filtering(self, mocker: MockerFixture):
+        """Test that astrovm/amyos with non-latest context applies normal filtering."""
+        from urh import TOMLFilterRules
+
+        # Create filter rules for astrovm/amyos repository
+        rules = TOMLFilterRules("astrovm/amyos")
+
+        # Test with raw tags using non-latest context
+        raw_tags = [
+            "latest.20251031",  # Should transform to 20251031
+            "stable-42.20250610",  # Should be preserved
+            "42.20250610",  # Should be preserved
+            "latest.",  # Should be filtered out by general filter
+            "latest.abc",  # Should be filtered out by general filter
+        ]
+
+        # Apply context-aware filtering for 'stable' context
+        result = rules.context_aware_filter_and_sort(raw_tags, "stable")
+
+        # With stable context, should only get tags with 'stable-' prefix
+        expected_tags = ["stable-42.20250610"]
+        assert result == expected_tags, f"Expected {expected_tags}, got {result}"
+
+    def test_astrovm_amyos_transform_patterns_integration(self, mocker: MockerFixture):
+        """Test that astrovm/amyos transform patterns work correctly in context filtering."""
+        from urh import TOMLFilterRules
+
+        # Create filter rules for astrovm/amyos repository
+        rules = TOMLFilterRules("astrovm/amyos")
+
+        # Test specific transformation of latest.YYYYMMDD to YYYYMMDD format
+        raw_tags = [
+            "latest.20251031",  # Should transform to 20251031
+            "latest.20251030",  # Should transform to 20251030
+            "latest.20241215",  # Should transform to 20241215
+        ]
+
+        # First test the transform functionality directly
+        transformed = [rules.transform_tag(tag) for tag in raw_tags]
+        expected_transformed = ["20251031", "20251030", "20241215"]
+        assert transformed == expected_transformed, (
+            f"Expected {expected_transformed}, got {transformed}"
+        )
+
+        # Then test with context filtering
+        result = rules.context_aware_filter_and_sort(raw_tags, "latest")
+        # Should get the transformed tags back
+        assert result == expected_transformed, (
+            f"Expected {expected_transformed}, got {result}"
+        )
+
+    def test_remote_ls_command_astrovm_amyos_latest_integration(
+        self, mocker: MockerFixture
+    ):
+        """Integration test for remote_ls_command with astrovm/amyos:latest."""
+        import io
+        from contextlib import redirect_stdout
+
+        from urh import OCIClient, remote_ls_command
+
+        # Mock the OCIClient to return specific raw tags
+        mock_client = mocker.Mock(spec=OCIClient)
+        mock_client.get_raw_tags.return_value = {
+            "tags": [
+                "latest.20251031",  # Should transform and show for :latest context
+                "latest.20251030",  # Should transform and show for :latest context
+                "latest.20251029",  # Should transform and show for :latest context
+                "stable-42.20250610",  # Should be filtered out
+                "42.20250610",  # Should be filtered out
+            ]
+        }
+
+        # Create actual TOMLFilterRules for astrovm/amyos to use in test
+        from urh import TOMLFilterRules
+
+        real_filter_rules = TOMLFilterRules("astrovm/amyos")
+        mock_client.filter_rules = real_filter_rules
+
+        # Patch the OCIClient constructor to return our mock
+        mocker.patch("urh.OCIClient", return_value=mock_client)
+
+        # Capture stdout to verify the output
+        captured_output = io.StringIO()
+
+        # Mock sys.exit to prevent actual exit
+        mocker.patch("urh.sys.exit")
+
+        # Run the command and capture output
+        with redirect_stdout(captured_output):
+            try:
+                remote_ls_command(["ghcr.io/astrovm/amyos:latest"])
+            except SystemExit:
+                pass  # Expected due to sys.exit(0)
+
+        output = captured_output.getvalue()
+
+        # Verify that the output contains the expected tags
+        assert "Tags for ghcr.io/astrovm/amyos:latest:" in output
+        assert "20251031" in output
+        assert "20251030" in output
+        assert "20251029" in output
+        # Ensure non-latest tags are not in the output
+        assert "stable-42.20250610" not in output
+        assert "42.20250610" not in output

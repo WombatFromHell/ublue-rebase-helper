@@ -1212,6 +1212,12 @@ def remote_ls_command(
             # Determine the tag context from the URL (e.g., "testing", "stable", "unstable", etc.)
             url_tag_context = extract_context_from_url(url)
 
+            # For astrovm/amyos repository, also treat "latest" as a special context
+            if repo_part == "astrovm/amyos" and url_tag_context is None:
+                # Check if the URL has :latest tag without it being recognized as a context
+                if ":" in url and url.split(":")[-1] == "latest":
+                    url_tag_context = "latest"
+
             # Create OCIClient instance with appropriate filter rules
             client = OCIClient(repo_part)
 
@@ -1454,9 +1460,15 @@ class TOMLFilterRules:
                 filtered_tags, url_context
             )
 
+            # Apply deduplication for context-aware filtering to avoid duplicates
+            # (e.g., when both original YYYYMMDD and transformed latest.YYYYMMDD exist)
+            unique_context_filtered_tags = self._deduplicate_tags_by_version(
+                context_filtered_tags
+            )
+
             # Sort by context-aware sorting function
             sorted_tags: List[str] = sorted(
-                context_filtered_tags,
+                unique_context_filtered_tags,
                 key=lambda t: _create_version_sort_key(
                     t, url_context, include_context_priority=True
                 ),
@@ -1482,16 +1494,27 @@ class TOMLFilterRules:
     def _context_filter_tags(self, tags: List[str], url_context: str) -> List[str]:
         """
         Filter tags to only include those with the matching context prefix.
+        For the 'astrovm/amyos' repository with 'latest' context, filter to include only YYYYMMDD format tags
+        (which are the transformed version of 'latest.YYYYMMDD' tags).
 
         Args:
             tags: List of tags to filter
-            url_context: The context to filter by (e.g., "testing", "stable")
+            url_context: The context to filter by (e.g., "testing", "stable", "latest")
 
         Returns:
             List of tags that match the context
         """
-        context_prefix = f"{url_context}-"
-        return [tag for tag in tags if tag.startswith(context_prefix)]
+        if self.repository == "astrovm/amyos" and url_context == "latest":
+            # For astrovm/amyos with latest context, after transformation we expect YYYYMMDD format tags
+            # (originally from latest.YYYYMMDD which got transformed to YYYYMMDD)
+            import re
+
+            yyyymmdd_pattern = r"^\d{8}$"  # 8 digits representing YYYYMMDD
+            return [tag for tag in tags if re.match(yyyymmdd_pattern, tag)]
+        else:
+            # For other repositories or other contexts, use the standard prefix-based filtering
+            context_prefix = f"{url_context}-"
+            return [tag for tag in tags if tag.startswith(context_prefix)]
 
     def _deduplicate_tags_by_version(self, tags: List[str]) -> List[str]:
         """
@@ -1589,85 +1612,6 @@ def get_filter_rules_for_repository(
     # Return a TOMLFilterRules instance which will load the appropriate configuration
     # The include_sha256_tags parameter is now handled through config
     return TOMLFilterRules(repository)
-
-
-def _context_aware_filter_and_sort(
-    tags: List[str], url_context: Optional[str] = None
-) -> List[str]:
-    """
-    Filter and sort tags based on the context from the URL, limiting to maximum 30 tags.
-    This function uses the default repository rules for filtering (for backward compatibility).
-
-    Args:
-        tags: List of tags to filter and sort
-        url_context: The context from the URL (e.g., "testing", "stable", or None)
-
-    Returns:
-        Filtered, sorted, and limited (max 30) list of tags
-    """
-    # Create a default TOMLFilterRules instance to handle the filtering
-    # Use a generic repository name since this is for backward compatibility
-    rules = TOMLFilterRules(
-        "ublue-os/bazzite"
-    )  # Use a default repository configuration
-
-    # Use the new context-aware method from TOMLFilterRules
-    return rules.context_aware_filter_and_sort(tags, url_context, limit=30)
-
-
-def _extract_version_key(tag: str) -> str:
-    """
-    Extract a version key for deduplication purposes.
-    For tags like 'stable-43.20251028', '43.20251028', 'testing-43.20251028',
-    this returns a normalized version string to identify duplicates.
-    """
-    import re
-
-    # Remove prefix if present for version parsing
-    clean_tag = tag
-    if tag.startswith("testing-"):
-        clean_tag = tag[8:]  # Remove "testing-" prefix
-    elif tag.startswith("stable-"):
-        clean_tag = tag[7:]  # Remove "stable-" prefix
-    elif tag.startswith("unstable-"):
-        clean_tag = tag[9:]  # Remove "unstable-" prefix
-
-    # Try XX.YYYYMMDD[.SUBVER] format
-    match = re.match(r"^(\d+)\.(\d{8})(?:\.(\d+))?$", clean_tag)
-    if match:
-        version_series = match.group(1)
-        date_part = match.group(2)
-        subver_part = match.group(3) if match.group(3) else ""
-        return f"{version_series}.{date_part}.{subver_part}"
-
-    # Try YYYYMMDD[.SUBVER] format
-    match = re.match(r"^(\d{8})(?:\.(\d+))?$", clean_tag)
-    if match:
-        date_part = match.group(1)
-        subver_part = match.group(2) if match.group(2) else ""
-        return f"{date_part}.{subver_part}"
-
-    # For non-matching formats, return the tag itself as the key (lowercase for case-insensitive comparison)
-    return tag.lower()
-
-
-def _should_replace_tag(existing_tag: str, new_tag: str) -> bool:
-    """
-    Determine if a new tag should replace an existing tag during deduplication.
-    When there are duplicates, prefer the prefixed version (stable-, testing-, unstable-)
-    over the unprefixed version with the same content.
-    """
-    # If the new tag has a prefix but the existing doesn't, prefer the new one
-    new_has_prefix = new_tag.startswith(("stable-", "testing-", "unstable-"))
-    existing_has_prefix = existing_tag.startswith(("stable-", "testing-", "unstable-"))
-
-    if new_has_prefix and not existing_has_prefix:
-        return True
-    elif not new_has_prefix and existing_has_prefix:
-        return False
-    else:
-        # If both have prefixes or both don't, keep the existing one (arbitrary choice)
-        return False
 
 
 def _extract_prefix_and_clean_tag(tag: str) -> Tuple[Optional[str], str]:
