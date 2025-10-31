@@ -115,6 +115,18 @@ When using interactive menus, the utility supports intuitive navigation:
 - These exceptions are caught by the main menu loop, which then either exits the program (main menu) or redisplays the main menu (submenus)
 - This provides a consistent user experience where ESC acts as a "back" function in submenus and "exit" in the main menu
 
+### Persistent Header Feature
+
+The utility includes a persistent header that displays current deployment information from `rpm-ostree status`:
+
+- The header is displayed above the main command menu and in all submenus
+- It shows the current repository and version in the format: `{repository} ({version})`
+- The information is parsed from the output of `rpm-ostree status` command
+- Functions involved: `get_current_deployment_info()` and `format_deployment_header()`
+- The header persists when navigating between menus (e.g., when returning from a submenu to the main menu)
+- The header is displayed using the `persistent_header` parameter in the `run_gum_submenu()` function
+- All submenu functions now accept an optional `persistent_header` parameter to maintain consistency
+
 ## Implementation Details
 
 ### Command Execution

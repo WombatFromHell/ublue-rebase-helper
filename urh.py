@@ -577,8 +577,9 @@ def _handle_gum_no_selection(
 
 def parse_command_argument(
     args: List[str],
-    submenu_func: Callable[[], Optional[Any]],
+    submenu_func: Callable[..., Optional[Any]],
     arg_parser: Optional[Callable[[str], Any]],
+    persistent_header: Optional[str] = None,
 ) -> Optional[Any]:
     """
     Parse command argument, either from provided args or from submenu.
@@ -587,13 +588,19 @@ def parse_command_argument(
         args: Command line arguments
         submenu_func: Function to call when no arguments provided
         arg_parser: Function to parse the argument
+        persistent_header: Optional persistent header to display
 
     Returns:
         The parsed argument value, or None if no selection made
     """
     if not args:
         # No arguments provided, show submenu to select
-        selected_value = submenu_func()
+        # Call submenu_func with persistent header if it accepts it
+        if persistent_header:
+            # Use a wrapper function that accepts persistent_header and calls submenu_func
+            selected_value = submenu_func(persistent_header=persistent_header)
+        else:
+            selected_value = submenu_func()
         # If submenu raises an exception (like MenuExitException), it will propagate up
         # If submenu returns None, we exit gracefully
         if selected_value is None or arg_parser is None:
@@ -818,6 +825,97 @@ def extract_context_from_url(url: str) -> Optional[str]:
         if url_tag in ["testing", "stable", "unstable"]:
             return url_tag
     return None
+
+
+def get_current_deployment_info() -> Optional[Dict[str, str]]:
+    """
+    Get the current deployment information by parsing 'rpm-ostree status'.
+
+    Returns:
+        A dictionary containing repository and version info, or None if parsing fails
+    """
+    try:
+        result = subprocess.run(
+            ["rpm-ostree", "status"], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            return None
+
+        lines = result.stdout.split("\n")
+
+        # Find the current deployment line (marked with ●)
+        current_deployment = None
+        version = None
+
+        for i, line in enumerate(lines):
+            # Look for the current deployment (marked with ●)
+            if line.strip().startswith("●"):
+                current_deployment = line.strip()
+                # Look for the version in subsequent lines
+                for j in range(i + 1, len(lines)):
+                    next_line = lines[j].strip()
+                    # Stop if we reach another deployment line or empty line
+                    if next_line.startswith("●") or (
+                        next_line.startswith(" ")
+                        and "ostree-image-signed:" in next_line
+                    ):
+                        break
+                    # Look for the Version line
+                    if next_line.startswith("Version:"):
+                        version = next_line.replace("Version:", "").strip()
+                        # Extract just the version string (e.g., 'testing-43.20251030')
+                        if " (" in version:
+                            version = version.split(" (")[0].strip()
+                        break
+                break
+
+        if not current_deployment:
+            return None
+
+        # Extract the image URL from the current deployment line
+        # Find the URL part after "ostree-image-signed:"
+        url_part = None
+        if "ostree-image-signed:" in current_deployment:
+            # Handle both formats: "ostree-image-signed:docker://<url>" and "ostree-image-signed:<url>"
+            after_prefix = current_deployment.split("ostree-image-signed:", 1)[
+                1
+            ].strip()
+            if after_prefix.startswith("docker://"):
+                url_part = after_prefix[9:]  # Remove "docker://" prefix
+            else:
+                url_part = after_prefix
+
+        if not url_part:
+            return None
+
+        # Extract repository from the URL
+        repository = extract_repository_from_url(url_part)
+
+        return {"repository": repository, "version": version or "Unknown"}
+    except Exception as e:
+        print(f"Error parsing current deployment info: {e}")
+        return None
+
+
+def format_deployment_header(deployment_info: Optional[Dict[str, str]]) -> str:
+    """
+    Format the deployment information into a header string.
+
+    Args:
+        deployment_info: Dictionary containing repository and version info
+
+    Returns:
+        Formatted header string
+    """
+    if not deployment_info or not deployment_info.get("repository"):
+        return (
+            "Current deployment: System Information: Unable to retrieve deployment info"
+        )
+
+    repository = deployment_info["repository"]
+    version = deployment_info.get("version", "Unknown")
+
+    return f"Current deployment: {repository} ({version})"
 
 
 def remote_ls_command(
@@ -1810,6 +1908,47 @@ def execute_command_with_args(command_parts: List[str], args: List[str]) -> None
     sys.exit(run_command(cmd))
 
 
+def execute_command_with_header(
+    command: str,
+    args: List[str],
+    persistent_header: Optional[str] = None,
+    is_interactive: bool = False,
+) -> None:
+    """
+    Execute a command with given arguments, optionally with a persistent header.
+
+    Args:
+        command: The command name to execute
+        args: List of arguments for the command
+        persistent_header: Optional header to display with submenu commands
+        is_interactive: Whether this is running in interactive mode
+    """
+    command_map = get_command_registry()
+
+    command_func = command_map.get(command)
+    if command_func:
+        try:
+            # Only pass the persistent_header to commands that accept it
+            import inspect
+
+            sig = inspect.signature(command_func)
+            if "persistent_header" in sig.parameters:
+                command_func(args, persistent_header=persistent_header)  # pyright: ignore [reportCallIssue]
+            else:
+                command_func(args)
+        except MenuExitException as e:
+            # In interactive mode, handle MenuExitException based on context
+            if is_interactive and e.is_main_menu:
+                # User pressed ESC in main menu, exit the program
+                sys.exit(0)
+            elif is_interactive:
+                # User pressed ESC in submenu, return to main menu (exit with success)
+                sys.exit(0)
+    else:
+        print(f"Unknown command: {command}")
+        help_command([])
+
+
 def get_command_registry() -> Dict[str, Callable[[List[str]], None]]:
     """
     Get the registry of available commands mapped to their functions.
@@ -1829,6 +1968,22 @@ def get_command_registry() -> Dict[str, Callable[[List[str]], None]]:
         "rm": rm_command,
         "help": help_command,
     }
+
+
+def show_command_menu_with_header(
+    is_tty_func: Callable[[], bool] = lambda: os.isatty(1),
+    subprocess_run_func: Callable[..., Any] = subprocess.run,
+    print_func: Callable[[str], Any] = print,
+    persistent_header: Optional[str] = None,
+) -> Optional[str]:
+    """Show a menu of available commands using gum with a persistent header."""
+    # Display the persistent header first if provided
+    if persistent_header:
+        print_func(persistent_header)
+        # No extra blank line to keep header close to menu
+
+    # Call the original function to show the actual menu
+    return show_command_menu(is_tty_func, subprocess_run_func, print_func)
 
 
 def execute_command(
@@ -1878,7 +2033,9 @@ def main(argv: Optional[List[str]] = None):
 
         if in_test_mode:
             # Single execution for tests to avoid hanging
-            command = show_command_menu()
+            deployment_info = get_current_deployment_info()
+            header = format_deployment_header(deployment_info)
+            command = show_command_menu_with_header(persistent_header=header)
             if not command:
                 sys.exit(0)
 
@@ -1887,7 +2044,9 @@ def main(argv: Optional[List[str]] = None):
             # Interactive menu loop
             while True:
                 try:
-                    command = show_command_menu()
+                    deployment_info = get_current_deployment_info()
+                    header = format_deployment_header(deployment_info)
+                    command = show_command_menu_with_header(persistent_header=header)
                     if not command:
                         sys.exit(0)
 
