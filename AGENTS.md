@@ -12,6 +12,7 @@ This is a Python project that uses:
 - `ruff` for formatting and linting
 - `pyright` for type checking
 - `prettier` for formatting/linting of markdown files
+- `curl` for OCI registry interactions (required dependency)
 
 ## Testing Commands
 
@@ -33,12 +34,14 @@ Formatting and linting should be run before finishing any code changes.
 
 ## Recommended Workflow
 
-1. Read `DESIGN.md` and adhere to our existing design spec before constructing any code changes or action plans
-2. After making code changes, run `ruff check --select I --fix; ruff format; pyright` to format/lint the code
-3. Run `ruff check --select I --fix; ruff format` to check and correct for linting and/or formatting issues
-4. Run `prettier --cache -c -w *.md` from the project root to format markdown files
-5. Run `pyright` to check for type errors
-6. Run `uv run pytest -vs` to ensure all tests pass
+- Read `DESIGN.md` and strictly adhere to listed design spec before constructing any code changes or action plans
+- `DESIGN.md` acts as our spec document and single-source-of-truth upon which our implementation and test suite is designed
+- Run `ruff check --select I --fix; ruff format; pyright` to check and correct for linting, typing, and formatting issues
+- After making code changes, make sure to run our ruff/pyright commands above to format/lint the code
+- Run `prettier --cache -c -w *.md` from the project root to format markdown files
+- After making changes to markdown files, run our prettier command above to format them
+- Run `pyright` to check for type errors
+- Run `uv run pytest -vs` to ensure all tests pass
 
 ## Project Structure
 
@@ -62,6 +65,15 @@ Formatting and linting should be run before finishing any code changes.
 - When implementing new features or making significant changes, a planning step must be presented to and approved by the user before any code changes are applied to the codebase
 - No destructive changes can be applied to the project without explicit user approval first
 - When design changes are made, update the DESIGN.md document to reflect current implementation decisions
+- Check for required system dependencies (like `curl`) using utility functions before executing dependent functionality
+- Use centralized command registries for managing command definitions and handlers
+- Implement proper exit code handling by using `sys.exit()` with appropriate exit codes from underlying commands
+- Follow the established pattern of using dataclasses for configuration and command definitions
+- Use dedicated exception classes like `MenuExitException` for specific control flow scenarios
+- Implement both gum-based and text-based fallback interfaces to ensure functionality across different environments
+- Apply proper input validation on numeric arguments to prevent command injection
+- Use NamedTuple for structured data representations like DeploymentInfo
+- Implement token caching and validation mechanisms for external API interactions
 
 ## Testing Standards
 

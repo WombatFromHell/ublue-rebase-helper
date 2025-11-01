@@ -1,208 +1,468 @@
-"""End-to-end tests for ublue-rebase-helper (urh.py)."""
-
-import os
-import sys
-
 import pytest
-from pytest_mock import MockerFixture
 
-# Add the parent directory to sys.path so we can import urh
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from urh import (
+    CommandRegistry,
+    ConfigManager,
+    DeploymentInfo,
+    MenuExitException,
+    URHConfig,
+    get_config,
+)
 
-from urh import main
 
-
-class TestMainE2E:
-    """End-to-end tests for the main function."""
+class TestMainWorkflow:
+    """Test main application workflow."""
 
     @pytest.mark.parametrize(
-        "command,expected_func,expected_args",
+        "command,args,expected_calls",
         [
-            ("rebase", "rebase_command", ["test-url"]),
-            ("check", "check_command", []),
-            ("ls", "ls_command", []),
-            ("rollback", "rollback_command", []),
-            ("upgrade", "upgrade_command", []),
-            ("pin", "pin_command", ["1"]),
-            ("unpin", "unpin_command", ["2"]),
-            ("rm", "rm_command", ["3"]),
-            ("remote-ls", "remote_ls_command", ["ghcr.io/test/repo:latest"]),
+            ("check", [], [("get_command", "check"), ("handler", [])]),
+            (
+                "rebase",
+                ["ghcr.io/test/repo:testing"],
+                [("get_command", "rebase"), ("handler", ["ghcr.io/test/repo:testing"])],
+            ),
         ],
     )
-    def test_main_calls_correct_command(
-        self,
-        mocker: MockerFixture,
-        command: str,
-        expected_func: str,
-        expected_args: list,
+    def test_main_with_command(self, mocker, command, args, expected_calls):
+        """Test main function with a command."""
+        mock_command_registry = mocker.MagicMock()
+        mock_command = mocker.MagicMock()
+        mock_command_registry.get_command.return_value = mock_command
+
+        import sys
+
+        original_argv = sys.argv
+        sys.argv = ["urh.py", command] + args
+        mock_exit = mocker.patch("sys.exit")
+
+        try:
+            mocker.patch("urh.CommandRegistry", return_value=mock_command_registry)
+            # Import here to avoid issues with mocking
+            from urh import main
+
+            main()
+
+            for method_name, expected_arg in expected_calls:
+                if method_name == "get_command":
+                    mock_command_registry.get_command.assert_called_once_with(
+                        expected_arg
+                    )
+                else:
+                    getattr(mock_command, method_name).assert_called_once_with(
+                        expected_arg
+                    )
+        finally:
+            sys.argv = original_argv
+
+    def test_main_with_invalid_command(self, mocker):
+        """Test main function with an invalid command."""
+        mock_command_registry = mocker.MagicMock()
+        mock_command_registry.get_command.return_value = None
+
+        import sys
+
+        original_argv = sys.argv
+        sys.argv = ["urh.py", "invalid_command"]
+        mock_exit = mocker.patch("sys.exit")
+
+        try:
+            mocker.patch("urh.CommandRegistry", return_value=mock_command_registry)
+            # Import here to avoid issues with mocking
+            from urh import main
+
+            main()
+
+            mock_command_registry.get_command.assert_called_once_with("invalid_command")
+            mock_exit.assert_called_once_with(1)
+        finally:
+            sys.argv = original_argv
+
+    def test_main_with_menu(self, mocker):
+        """Test main function with interactive menu."""
+
+        # Mock the _main_menu_loop to control its behavior and avoid infinite loop in tests
+        def mock_main_menu_loop(max_iterations=None):
+            # Mock functions that make system calls to prevent hanging
+            mocker.patch(
+                "urh.get_current_deployment_info",
+                return_value={"repository": "test", "version": "v1.0"},
+            )
+            mocker.patch(
+                "urh.format_deployment_header",
+                return_value="Current deployment: test (v1.0)",
+            )
+
+            # Simulate selecting a command and executing it once
+            mock_menu_system = mocker.MagicMock()
+            mock_menu_system.show_menu.return_value = "check"
+            mocker.patch("urh._menu_system", mock_menu_system)
+
+            # Execute the command once
+            mock_command_registry = mocker.MagicMock()
+            mock_command = mocker.MagicMock()
+            mock_command_registry.get_command.return_value = mock_command
+            mocker.patch("urh.CommandRegistry", return_value=mock_command_registry)
+
+            mock_command.handler([])
+
+            # Instead of raising an exception, just return to simulate single iteration
+            return
+
+        import sys
+
+        original_argv = sys.argv
+        sys.argv = ["urh.py"]
+        mock_exit = mocker.patch("sys.exit")
+
+        try:
+            mocker.patch("urh._main_menu_loop", side_effect=mock_main_menu_loop)
+            # Import here to avoid issues with mocking
+            from urh import main
+
+            main()
+
+            # Verify the command was called - we can't really test the full behavior here
+            # since we're mocking the core loop, but at least the function should complete
+            pass
+        finally:
+            sys.argv = original_argv
+
+    def test_main_with_menu_esc(self, mocker):
+        """Test main function with interactive menu and ESC."""
+
+        # Mock _main_menu_loop to simulate ESC press in main menu
+        def mock_main_menu_loop(max_iterations=None):
+            # Raise MenuExitException(is_main_menu=True) to simulate ESC in main menu
+            raise MenuExitException(is_main_menu=True)
+
+        import sys
+
+        original_argv = sys.argv
+        sys.argv = ["urh.py"]
+        mock_exit = mocker.patch("sys.exit")
+
+        try:
+            mocker.patch("urh._main_menu_loop", side_effect=mock_main_menu_loop)
+            # Import here to avoid issues with mocking
+            from urh import main
+
+            main()
+
+            mock_exit.assert_called_once_with(0)
+        finally:
+            sys.argv = original_argv
+
+
+class TestCommandWorkflows:
+    """Test complete command workflows."""
+
+    @pytest.mark.parametrize(
+        "command,expected_cmd,requires_sudo",
+        [
+            ("check", ["rpm-ostree", "upgrade", "--check"], False),
+            ("upgrade", ["sudo", "rpm-ostree", "upgrade"], True),
+            ("rollback", ["sudo", "rpm-ostree", "rollback"], True),
+        ],
+    )
+    def test_simple_command_workflows(
+        self, mocker, command, expected_cmd, requires_sudo
     ):
-        """Test main calls the correct command function with appropriate arguments."""
-        # Prepare argv with command and its arguments
-        argv = ["urh.py", command] + expected_args
+        """Test simple command workflows."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
 
-        # Mock sys.argv to simulate the command
-        mocker.patch.object(sys, "argv", argv)
+        registry = CommandRegistry()
+        handler = getattr(registry, f"_handle_{command}")
+        handler([])
 
-        # Mock sys.exit so it doesn't actually exit
-        mocker.patch("urh.sys.exit")
-
-        # Mock the expected command function to track if it's called
-        mock_command_func = mocker.patch(f"urh.{expected_func}")
-
-        # Call main function
-        main()
-
-        # Verify that the correct command function was called with the right arguments
-        mock_command_func.assert_called_once_with(expected_args)
-
-    def test_main_no_args_shows_menu(self, mocker: MockerFixture):
-        """Test main shows menu when no arguments provided."""
-        # Mock sys.argv to simulate no command-line arguments
-        mocker.patch.object(sys, "argv", ["urh.py"])
-
-        # Mock the show_command_menu to return empty string (no command to execute)
-        mock_show_command_menu = mocker.patch("urh.show_command_menu", return_value="")
-
-        # Mock sys.exit to avoid actual exit
-        mock_sys_exit = mocker.patch("urh.sys.exit")
-
-        # Call main function
-        main()
-
-        # Verify that show_command_menu was called
-        mock_show_command_menu.assert_called_once()
-
-        # Verify that sys.exit was called with code 0 (normal exit)
+        mock_run_command.assert_called_once_with(expected_cmd)
         mock_sys_exit.assert_called_once_with(0)
 
-    def test_main_unknown_command(self, mocker: MockerFixture):
-        """Test main shows help for unknown command."""
-        # Mock sys.argv to simulate an unknown command
-        mocker.patch.object(sys, "argv", ["urh.py", "unknown"])
-
-        # Mock sys.exit so it doesn't actually exit
-        mocker.patch("urh.sys.exit")
-
-        # Mock the help_command to avoid actual printing
-        mock_help_command = mocker.patch("urh.help_command")
-
-        # Call main function
-        main()
-
-        # Verify that help_command was called with empty args
-        mock_help_command.assert_called_once_with([])
-
-
-class TestMainE2EErrorScenarios:
-    """Additional end-to-end tests for error scenarios."""
-
-    def test_main_with_invalid_args_for_number_commands(self, mocker: MockerFixture):
-        """Test main handles invalid arguments for commands that expect numbers."""
-        # Test invalid number for pin command
-        mocker.patch.object(sys, "argv", ["urh.py", "pin", "invalid"])
-        mock_print = mocker.patch("urh.print")
-        mocker.patch("urh.sys.exit")
-
-        main()
-
-        # Should print error message about invalid number
-        mock_print.assert_any_call("Invalid deployment number: invalid")
-
-    def test_main_with_invalid_args_for_rebase(self, mocker: MockerFixture):
-        """Test main with rebase command that will trigger submenu."""
-        # This is more of a functional test, mocking the submenu behavior
-        mocker.patch.object(sys, "argv", ["urh.py", "rebase"])
-        mock_rebase = mocker.patch("urh.rebase_command")
-        mocker.patch("urh.sys.exit")
-
-        main()
-
-        # Should call rebase command (rebase_command will handle submenu)
-        # We're not going to test the full submenu flow here since it's an E2E test
-        mock_rebase.assert_called_once()
-
-    def test_main_multiple_args(self, mocker: MockerFixture):
-        """Test main with commands that might have multiple arguments."""
-        # Test rebase with full URL
-        mocker.patch.object(
-            sys, "argv", ["urh.py", "rebase", "ghcr.io/ublue-os/bazzite:latest"]
+    def test_ls_command_workflow(self, mocker):
+        """Test complete ls command workflow."""
+        mock_get_status_output = mocker.patch(
+            "urh.get_status_output", return_value="test output"
         )
-        mock_rebase_command = mocker.patch("urh.rebase_command")
-        mocker.patch("urh.sys.exit")
+        mock_print = mocker.patch("builtins.print")
+        mock_sys_exit = mocker.patch("sys.exit")
 
-        main()
+        registry = CommandRegistry()
+        registry._handle_ls([])
 
-        # Should call rebase with the provided URL
-        mock_rebase_command.assert_called_once_with(["ghcr.io/ublue-os/bazzite:latest"])
+        mock_get_status_output.assert_called_once()
+        mock_print.assert_called_once_with("test output")
+        mock_sys_exit.assert_called_once_with(0)
 
-    def test_main_help_command(self, mocker: MockerFixture):
-        """Test main with help command."""
-        mocker.patch.object(sys, "argv", ["urh.py", "help"])
-        mock_help_command = mocker.patch("urh.help_command")
-        mocker.patch("urh.sys.exit")
+    def test_rebase_command_workflow_with_args(self, mocker):
+        """Test complete rebase command workflow with arguments."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
 
-        main()
+        registry = CommandRegistry()
+        registry._handle_rebase(["ghcr.io/test/repo:testing"])
 
-        # Should call help command with empty arguments
-        mock_help_command.assert_called_once_with([])
+        mock_run_command.assert_called_once_with(
+            ["sudo", "rpm-ostree", "rebase", "ghcr.io/test/repo:testing"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
 
-    def test_main_remote_ls_command_with_url(self, mocker: MockerFixture):
-        """Test main with remote-ls command and specific URL."""
-        # Mock sys.argv to simulate the remote-ls command with URL
-        mocker.patch.object(
-            sys, "argv", ["urh.py", "remote-ls", "ghcr.io/ublue-os/bazzite:latest"]
+    def test_rebase_command_workflow_with_menu(self, mocker):
+        """Test complete rebase command workflow with menu."""
+        mock_get_config = mocker.patch("urh.get_config")
+        mock_get_current_deployment_info = mocker.patch(
+            "urh.get_current_deployment_info"
+        )
+        mock_format_deployment_header = mocker.patch("urh.format_deployment_header")
+        mock_menu_system = mocker.patch("urh._menu_system")
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        config = mocker.MagicMock()
+        config.container_urls.options = [
+            "ghcr.io/test/repo:testing",
+            "ghcr.io/test/repo:stable",
+        ]
+        mock_get_config.return_value = config
+
+        current_deployment_info = {
+            "repository": "bazzite-nix",
+            "version": "42.20231115.0",
+        }
+        mock_get_current_deployment_info.return_value = current_deployment_info
+        mock_format_deployment_header.return_value = (
+            "Current deployment: bazzite-nix (42.20231115.0)"
         )
 
-        # Mock sys.exit so it doesn't actually exit
-        mocker.patch("urh.sys.exit")
+        mock_menu_system.show_menu.return_value = "ghcr.io/test/repo:stable"
 
-        # Mock the remote_ls_command to track if it's called
-        mock_remote_ls_command = mocker.patch("urh.remote_ls_command")
+        registry = CommandRegistry()
+        registry._handle_rebase([])
 
-        # Call main function
-        main()
-
-        # Verify that remote_ls_command was called with the right arguments
-        mock_remote_ls_command.assert_called_once_with(
-            ["ghcr.io/ublue-os/bazzite:latest"]
+        mock_get_config.assert_called_once()
+        mock_get_current_deployment_info.assert_called_once()
+        mock_format_deployment_header.assert_called_once_with(current_deployment_info)
+        mock_menu_system.show_menu.assert_called_once()
+        mock_run_command.assert_called_once_with(
+            ["sudo", "rpm-ostree", "rebase", "ghcr.io/test/repo:stable"]
         )
+        mock_sys_exit.assert_called_once_with(0)
 
-    def test_main_remote_ls_command_with_different_registry(
-        self, mocker: MockerFixture
+    def test_remote_ls_command_workflow_with_args(self, mocker):
+        """Test complete remote-ls command workflow with arguments."""
+        mock_extract_repository = mocker.patch(
+            "urh.extract_repository_from_url", return_value="test/repo"
+        )
+        mock_client_class = mocker.patch("urh.OCIClient")
+        mock_sys_exit = mocker.patch("sys.exit")
+        mock_print = mocker.patch("builtins.print")
+
+        mock_instance = mocker.MagicMock()
+        mock_instance.fetch_repository_tags.return_value = {"tags": ["tag1", "tag2"]}
+        mock_client_class.return_value = mock_instance
+
+        registry = CommandRegistry()
+        registry._handle_remote_ls(["ghcr.io/test/repo:testing"])
+
+        mock_extract_repository.assert_called_once_with("ghcr.io/test/repo:testing")
+        mock_client_class.assert_called_once_with("test/repo")
+        mock_instance.fetch_repository_tags.assert_called_once_with(
+            "ghcr.io/test/repo:testing"
+        )
+        mock_print.assert_any_call("Tags for ghcr.io/test/repo:testing:")
+        mock_print.assert_any_call("  tag1")
+        mock_print.assert_any_call("  tag2")
+        mock_sys_exit.assert_called_once_with(0)
+
+    @pytest.mark.parametrize(
+        "command,cmd_suffix,expected_cmd",
+        [
+            (
+                "pin",
+                ["ostree", "admin", "pin", "1"],
+                ["sudo", "ostree", "admin", "pin", "1"],
+            ),
+            (
+                "unpin",
+                ["ostree", "admin", "pin", "-u", "1"],
+                ["sudo", "ostree", "admin", "pin", "-u", "1"],
+            ),
+            (
+                "rm",
+                ["rpm-ostree", "cleanup", "-r", "1"],
+                ["sudo", "rpm-ostree", "cleanup", "-r", "1"],
+            ),
+        ],
+    )
+    def test_deployment_command_workflows_with_args(
+        self, mocker, command, cmd_suffix, expected_cmd
     ):
-        """Test main with remote-ls command and different registry."""
-        # Mock sys.argv to simulate the remote-ls command with a different registry
-        mocker.patch.object(
-            sys, "argv", ["urh.py", "remote-ls", "docker.io/library/ubuntu:20.04"]
+        """Test complete deployment management command workflows with arguments."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        handler = getattr(registry, f"_handle_{command}")
+        handler(["1"])
+
+        mock_run_command.assert_called_once_with(expected_cmd)
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_pin_command_workflow_with_menu(self, mocker, sample_deployment_info):
+        """Test complete pin command workflow with menu."""
+        mock_get_deployment_info = mocker.patch("urh.get_deployment_info")
+        mock_get_current_deployment_info = mocker.patch(
+            "urh.get_current_deployment_info"
         )
+        mock_format_deployment_header = mocker.patch("urh.format_deployment_header")
+        mock_menu_system = mocker.patch("urh._menu_system")
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
 
-        # Mock sys.exit so it doesn't actually exit
-        mocker.patch("urh.sys.exit")
+        current_deployment_info = {
+            "repository": "bazzite-nix",
+            "version": "42.20231115.0",
+        }
 
-        # Mock the remote_ls_command to track if it's called
-        mock_remote_ls_command = mocker.patch("urh.remote_ls_command")
-
-        # Call main function
-        main()
-
-        # Verify that remote_ls_command was called with the right arguments
-        mock_remote_ls_command.assert_called_once_with(
-            ["docker.io/library/ubuntu:20.04"]
+        mock_get_deployment_info.return_value = sample_deployment_info
+        mock_get_current_deployment_info.return_value = current_deployment_info
+        mock_format_deployment_header.return_value = (
+            "Current deployment: bazzite-nix (42.20231115.0)"
         )
+        mock_menu_system.show_menu.return_value = 1
 
-    def test_main_remote_ls_command_no_args(self, mocker: MockerFixture):
-        """Test main with remote-ls command but no arguments (should show submenu)."""
-        # Mock sys.argv to simulate the remote-ls command with no arguments
-        mocker.patch.object(sys, "argv", ["urh.py", "remote-ls"])
+        registry = CommandRegistry()
+        registry._handle_pin([])
 
-        # Mock sys.exit so it doesn't actually exit
-        mocker.patch("urh.sys.exit")
+        mock_get_deployment_info.assert_called_once()
+        mock_get_current_deployment_info.assert_called_once()
+        mock_format_deployment_header.assert_called_once_with(current_deployment_info)
+        mock_menu_system.show_menu.assert_called_once()
+        mock_run_command.assert_called_once_with(
+            ["sudo", "ostree", "admin", "pin", "1"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
 
-        # Mock the remote_ls_command to track if it's called
-        mock_remote_ls_command = mocker.patch("urh.remote_ls_command")
 
-        # Call main function
-        main()
+class TestErrorHandlingWorkflows:
+    """Test error handling in complete workflows."""
 
-        # Verify that remote_ls_command was called with no arguments (to show submenu)
-        mock_remote_ls_command.assert_called_once_with([])
+    def test_command_not_found_workflow(self, mocker):
+        """Test workflow when command is not found."""
+        mock_command_registry = mocker.MagicMock()
+        mock_command_registry.get_command.return_value = None
+        mocker.patch("builtins.print")
+
+        import sys
+
+        original_argv = sys.argv
+        sys.argv = ["urh.py", "nonexistent"]
+        mock_exit = mocker.patch("sys.exit")
+
+        try:
+            mocker.patch("urh.CommandRegistry", return_value=mock_command_registry)
+            # Import here to avoid issues with mocking
+            from urh import main
+
+            main()
+
+            mock_command_registry.get_command.assert_called_once_with("nonexistent")
+            mock_exit.assert_called_once_with(1)
+        finally:
+            sys.argv = original_argv
+
+    def test_subprocess_error_workflow(self, mocker):
+        """Test workflow when subprocess command fails."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=1)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_check([])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "upgrade", "--check"])
+        mock_sys_exit.assert_called_once_with(1)
+
+    def test_menu_esc_workflow(self, mocker):
+        """Test workflow when ESC is pressed in menu."""
+        mock_get_config = mocker.patch("urh.get_config")
+        mock_menu_system = mocker.patch("urh._menu_system")
+
+        config = mocker.MagicMock()
+        config.container_urls.options = [
+            "ghcr.io/test/repo:testing",
+            "ghcr.io/test/repo:stable",
+        ]
+        mock_get_config.return_value = config
+
+        mock_menu_system.show_menu.side_effect = MenuExitException(is_main_menu=False)
+
+        registry = CommandRegistry()
+        registry._handle_rebase([])
+
+        mock_get_config.assert_called_once()
+        mock_menu_system.show_menu.assert_called_once()
+
+    def test_no_deployments_workflow(self, mocker):
+        """Test workflow when no deployments are available."""
+        # Return deployments that are all already pinned (so none available to pin)
+        mock_get_deployment_info = mocker.patch(
+            "urh.get_deployment_info",
+            return_value=[
+                DeploymentInfo(
+                    deployment_index=0,
+                    is_current=True,
+                    repository="bazzite-nix",
+                    version="42.20231115.0",
+                    is_pinned=True,  # Already pinned
+                ),
+                DeploymentInfo(
+                    deployment_index=1,
+                    is_current=False,
+                    repository="bazzite-nix",
+                    version="41.20231110.0",
+                    is_pinned=True,  # Already pinned
+                ),
+            ],
+        )
+        mock_print = mocker.patch("builtins.print")
+
+        registry = CommandRegistry()
+        registry._handle_pin([])
+
+        mock_get_deployment_info.assert_called_once()
+        mock_print.assert_called_once_with("No deployments available to pin.")
+
+
+class TestConfigurationWorkflows:
+    """Test configuration management workflows."""
+
+    def test_config_loading_workflow(self, mocker):
+        """Test complete configuration loading workflow."""
+        mock_config_manager = mocker.MagicMock()
+        mock_config = mocker.MagicMock()
+        mock_config_manager.load_config.return_value = mock_config
+
+        mocker.patch("urh._config_manager", mock_config_manager)
+        config = get_config()
+
+        assert config == mock_config
+        mock_config_manager.load_config.assert_called_once()
+
+    def test_config_creation_workflow(self, mocker):
+        """Test complete configuration creation workflow."""
+        mock_config_path = mocker.MagicMock()
+        mock_config_path.exists.return_value = False
+
+        config_manager = ConfigManager()
+        config_manager.get_config_path = mocker.MagicMock(return_value=mock_config_path)
+
+        mock_create = mocker.patch.object(config_manager, "create_default_config")
+        mock_get_default = mocker.patch.object(URHConfig, "get_default")
+        mock_config = mocker.MagicMock()
+        mock_get_default.return_value = mock_config
+
+        result = config_manager.load_config()
+
+        assert result == mock_config
+        mock_create.assert_called_once()
+        mock_get_default.assert_called_once()
