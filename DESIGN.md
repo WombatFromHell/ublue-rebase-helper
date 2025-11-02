@@ -145,13 +145,14 @@ The application automatically creates a default configuration file if one doesn'
 
 ### Configuration Classes
 
-The configuration system is implemented using dataclasses:
+The configuration system is implemented using dataclasses with validation:
 
-- `URHConfig`: Main configuration class
-- `RepositoryConfig`: Configuration for a specific repository
-- `ContainerURLsConfig`: Configuration for container URLs
-- `SettingsConfig`: Global settings configuration
-- `ConfigManager`: Manages configuration loading and saving
+- `URHConfig`: Main configuration class with `get_default()` method using `Self` type and `__slots__` and `kw_only=True`
+- `RepositoryConfig`: Configuration for a specific repository with validation via `__post_init__` and `__slots__` and `kw_only=True`
+- `ContainerURLsConfig`: Configuration for container URLs with `__slots__` and `kw_only=True`
+- `SettingsConfig`: Global settings configuration with validation via `__post_init__` and `__slots__` and `kw_only=True`
+- `ConfigManager`: Manages configuration loading and saving with pattern matching serialization and internal `_config_path` caching
+- **Dataclass Improvements**: Uses `__slots__` for memory efficiency and validation methods and `kw_only=True` for better API design
 
 ### Repository Filter Rules Configuration
 
@@ -184,20 +185,27 @@ Global settings are defined in the `[settings]` section:
 
 Commands are defined using a centralized command registry (`CommandRegistry`) which maps command names to their definitions (including description, sudo requirement, and handler function). This approach reduces duplication and makes it easier to add new commands.
 
-The `CommandDefinition` dataclass defines command properties and behavior, enabling centralized command registration. Each command is registered with its name, description, handler function, sudo requirement, and whether it has a submenu.
+The `CommandDefinition` dataclass with `__slots__` and `kw_only=True` defines command properties and behavior, enabling centralized command registration. Each command is registered with its name, description, handler function, sudo requirement, and whether it has a submenu.
 
-- **Command Definition**: Uses `CommandDefinition` dataclass to define command properties (name, description, handler, requires_sudo, has_submenu)
+- **Command Definition**: Uses `CommandDefinition` dataclass with `__slots__` and `kw_only=True` to define command properties (name, description, handler, requires_sudo, has_submenu)
 - **Centralized Registration**: All commands are registered in `CommandRegistry._register_commands()` method
 - **Handler Functions**: Each command has a dedicated handler function (e.g., `_handle_rebase`, `_handle_pin`) that implements the command-specific logic
 - **Sudo Integration**: Automatically prepends `sudo` to commands that require elevated privileges
 - **Submenu Integration**: Commands with submenus (like rebase, pin, unpin, rm) provide interactive menu options when no arguments are provided
 - **Argument Parsing**: Supports both direct command execution with arguments and interactive menu selection
+- **Generic Argument Parsing**: Uses `ArgumentParser` generic class for argument validation and prompting
 - **Exit Code Handling**: Properly handles exit codes from underlying system commands using `sys.exit()`
 - **Error Handling**: Includes validation for numeric arguments to prevent command injection and provides user-friendly error messages
 
 ### Command Execution
 
-All commands are executed using `run_command()` with proper error handling. The utility returns the exit code from the underlying commands to maintain proper exit status behavior.
+All commands are executed using `run_command()` with proper error handling and timeout protection. The utility returns the exit code from the underlying commands to maintain proper exit status behavior. The `run_command` function includes:
+
+- Timeout protection (300 seconds default, configurable per operation)
+- Structured logging for better debuggability
+- Proper exit code handling including timeout exit codes (124)
+- Backward compatibility for existing function calls
+- Security with `run_command_safe()` for type-level injection prevention using `LiteralString`
 
 ### Type Safety Requirements
 
@@ -208,6 +216,7 @@ The codebase follows strict typing requirements to improve maintainability and r
 - Functions should return a single valid type or `None` and never return blank strings as a form of "no value"
 - Avoid union return types like `Union[str, None]` where possible in favor of proper `Optional[T]` annotations
 - Separate business logic from UI presentation by having distinct functions for data processing and display
+- Use modern Python 3.11+ type features like `Self`, `TypeGuard`, `Never`, and `LiteralString` where appropriate
 
 The implementation uses several type aliases for better type safety:
 
@@ -231,6 +240,10 @@ The `OCIClient` class provides functionality for interacting with OCI Container 
 - **Header Processing**: Manages HTTP headers using temporary files to fetch and parse Link headers for pagination
 - **Page Fetching**: Uses curl with proper authorization headers to fetch individual pages of tags
 - **URL Handling**: Properly handles relative and absolute URLs when following pagination links
+- **Logging**: Uses structured logging instead of print statements for better debuggability
+- **Timeout Protection**: Implements timeout protection for curl operations (30 seconds default)
+- **CurlResult**: Uses `NamedTuple` to structure curl operation results
+- **Performance Optimizations**: Added `functools.lru_cache` for compiled regex patterns to improve performance (maxsize=128)
 
 ### OCITagFilter Implementation
 
@@ -246,6 +259,8 @@ The `OCITagFilter` class handles tag filtering and sorting logic:
 - **Context-aware Sorting**: Prioritizes context-prefixed tags (testing-, stable-, unstable-) over non-prefixed tags during sorting
 - **Date-based Sorting**: Handles YYYYMMDD date formats and XX.YYYYMMDD version formats with subversion support
 - **Alphabetical Fallback**: Provides alphabetical sorting for unrecognized tag formats
+- **Performance Optimizations**: Added regex pattern caching with `@functools.lru_cache(maxsize=128)` for improved performance
+- **Cached Pattern Function**: Uses `_get_compiled_pattern()` with LRU cache for pattern compilation
 
 ### Context-Aware Tag Filtering
 
@@ -273,6 +288,8 @@ Commands that modify the system state require elevated privileges using `sudo`. 
 - Invalid deployment numbers are caught and reported with user-friendly error messages
 - Missing arguments result in usage information being displayed
 - Command not found errors are caught and reported appropriately
+- Input validation is performed on numeric arguments to prevent command injection
+- Timeout handling with proper exit codes (124 for timeouts)
 
 ### Deployment Information Parsing
 
@@ -284,7 +301,7 @@ The utility parses deployment information from `rpm-ostree status -v` output usi
 - Version information from the Version line
 - Pinned status from Pinned: yes flag
 
-- **DeploymentInfo Class**: Uses `DeploymentInfo` NamedTuple to structure deployment data (deployment_index, is_current, repository, version, is_pinned)
+- **DeploymentInfo Class**: Uses `DeploymentInfo` dataclass with `__slots__` and `frozen=True` to structure deployment data (deployment_index, is_current, repository, version, is_pinned)
 - **Index Assignment**: Assigns deployment index based on order in the output, with the most recent deployment getting the highest index
 - **Current Status Detection**: Identifies current deployment using the ● character in the rpm-ostree status output
 - **Repository Extraction**: Extracts repository name by parsing the `ostree-image-signed:docker://` line
@@ -301,21 +318,49 @@ The MenuSystem supports multiple interface modes:
 - **Gum Mode**: Uses gum choose for interactive menus when gum is available
 - **Text Mode**: Provides numbered list selection when gum is not available or in non-TTY environments
 - **TTY Detection**: Uses `os.isatty()` to determine whether to use interactive or text mode
-- **MenuItem Classes**: Uses `MenuItem` and `ListItem` classes to format display options differently
+- **MenuItem Classes**: Uses `MenuItem` with `__slots__` and `ListItem` with `__slots__` classes to format display options differently
+- **Override Decorator**: Uses `@override` decorator for overridden methods like `ListItem.display_text`
 - **Exception Handling**: Uses `MenuExitException` to handle ESC key presses with `is_main_menu` flag to distinguish between main menu and submenu exits
 - **Persistent Headers**: Supports persistent headers using the `persistent_header` parameter that displays current deployment information above menus
 - **Menu Navigation**: Implements ESC key handling for navigation between menus with consistent user experience
 - **Item Selection**: Supports both key-based and value-based return from menu items using the item's meaningful key or value
 - **Fallback Mechanism**: Provides seamless fallback from gum to text mode when gum is not available or when running in automated environments
+- **Builder Pattern**: Implemented `GumCommand` dataclass with `__slots__` for cleaner menu command construction with timeout protection (5 minutes)
+- **Exception Handling Improvements**: Enhanced with walrus operator and next() for cleaner lookup in `_show_gum_menu`
+- **URH_AVOID_GUM Environment Variable**: Supports environment variable to force non-gum behavior to avoid hanging during tests
+- **Menu Selection Timeout**: 5-minute timeout protection for gum menu selection
+
+### Modern Python 3.11+ Features
+
+The implementation leverages several modern Python 3.11+ features:
+
+- **StrEnum**: Used for `CommandType` and `TagContext` string enumerations
+- **Override Decorator**: Used for overridden methods to improve maintainability
+- **LiteralString**: Used for security-critical command construction to prevent injection
+- **Self Type**: Used for type annotations in class methods
+- **TypeGuard**: Used for type narrowing in validation functions
+- **kw_only Parameter**: Used in dataclass definitions for better API design
+- **frozen Parameter**: Used in dataclass definitions to create immutable objects
+
+### Configuration System Enhancements
+
+The configuration system includes several improvements:
+
+- **Pattern Matching**: Uses `match`/`case` in `_serialize_value()` method instead of manual type checking
+- **Internal Caching**: Uses internal `_config_path` attribute in ConfigManager for caching
+- **Enhanced Validation**: Includes improved validation and error handling in configuration parsing
+- **Dataclass Improvements**: Uses `__slots__` and `kw_only=True` parameters for better performance and API design
 
 ## Dependencies
 
 - `rpm-ostree`: Core system for ostree-based updates
 - `ostree`: Core ostree functionality
 - `gum`: For interactive UI elements and menus
-- `python3.13+`: Minimum Python version requirement
+- `python3.11+`: Minimum Python version requirement (for modern type features, StrEnum, etc.)
 - `curl`: Required for OCI registry interactions (used by OCIClient)
 - `tomllib`: For TOML configuration parsing (built-in in Python 3.11+)
+- `logging`: For structured logging infrastructure (built-in in Python)
+- `functools`: For caching mechanisms (built-in in Python)
 
 ## Security Considerations
 
@@ -324,6 +369,11 @@ The MenuSystem supports multiple interface modes:
 - The utility operates within the established rpm-ostree/ostree security model
 - Token caching is done to `/tmp/` with appropriate error handling
 - Commands are executed through subprocess with proper argument separation
+- Timeout protection prevents hanging operations that could be exploited
+- Structured logging provides better audit trails while protecting sensitive information
+- Configuration validation prevents invalid settings that could compromise security
+- Type-level injection prevention using `LiteralString` and `run_command_safe()`
+- Proper validation of regex patterns in configuration to prevent regex injection
 
 ## Testing Strategy
 
