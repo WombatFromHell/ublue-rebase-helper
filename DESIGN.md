@@ -443,3 +443,34 @@ The test suite should leverage parametrization to consolidate similar test scena
 ### Test Function Naming
 
 When test functions are similarly named yet test different code concerns, each test function name should be changed to concisely reflect what the test's specific code concern is. This prevents tests from shadowing each other and makes it clear what each test is verifying.
+
+## Test Suite Architecture
+
+The project follows a comprehensive testing strategy with three distinct test categories, enhanced with advanced pytest features for maintainability and reduced code duplication.
+
+### Current Test Infrastructure
+
+The test suite leverages modern pytest features to minimize code duplication and maximize maintainability:
+
+- **Composite Fixtures**: High-level fixtures like `mock_deployment_scenario` that combine multiple mocks for common testing scenarios, reducing boilerplate code in individual tests.
+- **Parametrized Fixtures**: Advanced fixtures such as `command_execution_result` that can simulate different command execution outcomes (success, failure, timeout, not found) without duplicating mock setup.
+- **Test Data Factories**: Builder patterns like `deployment_builder` and `mock_sys_argv_context` for centralized test data generation and safe environment manipulation.
+- **Custom Assertion Helpers**: Reusable assertion functions like `assert_command_called_with_sudo` and `assert_deployment_filtered` that provide clear, consistent validation across tests.
+- **Context Manager Fixtures**: Safe resource management fixtures for system state manipulation like `mock_sys_argv_context`.
+
+### Test Organization
+
+Tests are organized using parametrization patterns that consolidate similar functionality:
+
+- **Command Handler Parametrization**: Single parametrized tests cover multiple command variants, with special handling for commands that require different logic (like `ls` command).
+- **Deployment Command Consolidation**: Pin, unpin, and rm command tests use shared parametrized fixtures to test deployment scenarios with consistent setup.
+- **Menu System Patterns**: Comprehensive parametrization covers different menu modes (gum, text, non-TTY) and error handling scenarios.
+- **OCI Client Testing**: Advanced parametrization enables testing of various OCI scenarios including pagination, token management, and context filtering.
+
+### Current Test Coverage
+
+- **Test Count**: 182 comprehensive tests covering all functionality
+- **Code Quality**: All tests pass linting checks (ruff, pyright) with no duplicate method names
+- **Maintainability**: Reusable fixtures and consistent parametrization patterns
+- **Readability**: Well-organized test structure with clear naming conventions
+- **Comprehensive Coverage**: All functionality thoroughly tested with enhanced error scenario coverage

@@ -1408,6 +1408,34 @@ class TestMenuSystem:
 
         assert result == expected_result
 
+    @pytest.mark.parametrize(
+        "input_sequence,expected_result,expected_call_count",
+        [
+            (["invalid", "1"], "1", 2),  # invalid then valid
+            (["999", "invalid", "1"], "1", 3),  # multiple invalid then valid
+        ],
+    )
+    def test_show_menu_text_invalid_choice(
+        self,
+        mocker,
+        sample_menu_items,
+        input_sequence,
+        expected_result,
+        expected_call_count,
+    ):
+        """Test showing text menu with invalid choice."""
+        mocker.patch("os.isatty", return_value=True)
+        mocker.patch("subprocess.run", side_effect=FileNotFoundError)
+        mock_input = mocker.patch("builtins.input", side_effect=input_sequence)
+        mock_print = mocker.patch("builtins.print")
+
+        menu_system = MenuSystem()
+        result = menu_system.show_menu(sample_menu_items, "Test Header")
+
+        assert result == expected_result
+        assert mock_input.call_count == expected_call_count
+        mock_print.assert_any_call("Invalid choice. Please try again.")
+
     def test_show_menu_gum_esc(self, mocker, sample_menu_items):
         """Test showing menu with gum and pressing ESC."""
         from subprocess import CalledProcessError
@@ -1442,34 +1470,6 @@ class TestMenuSystem:
 
         assert result is None
         mock_print.assert_called_with("No option selected.")
-
-    @pytest.mark.parametrize(
-        "input_sequence,expected_result,expected_call_count",
-        [
-            (["invalid", "1"], "1", 2),  # invalid then valid
-            (["999", "invalid", "1"], "1", 3),  # multiple invalid then valid
-        ],
-    )
-    def test_show_menu_text_invalid_choice(
-        self,
-        mocker,
-        sample_menu_items,
-        input_sequence,
-        expected_result,
-        expected_call_count,
-    ):
-        """Test showing text menu with invalid choice."""
-        mocker.patch("os.isatty", return_value=True)
-        mocker.patch("subprocess.run", side_effect=FileNotFoundError)
-        mock_input = mocker.patch("builtins.input", side_effect=input_sequence)
-        mock_print = mocker.patch("builtins.print")
-
-        menu_system = MenuSystem()
-        result = menu_system.show_menu(sample_menu_items, "Test Header")
-
-        assert result == expected_result
-        assert mock_input.call_count == expected_call_count
-        mock_print.assert_any_call("Invalid choice. Please try again.")
 
     def test_show_menu_text_keyboard_interrupt(self, mocker, sample_menu_items):
         """Test showing text menu with keyboard interrupt."""
@@ -1717,6 +1717,20 @@ class TestMainFunction:
         mock_run_command.assert_called_once_with(expected_cmd)
         mock_sys_exit.assert_called_once_with(0)
 
+    def test_ls_command_handler(self, mocker):
+        """Test handling the ls command separately since it doesn't use run_command."""
+        mock_get_status_output = mocker.patch(
+            "urh.get_status_output", return_value="test output"
+        )
+        mock_print = mocker.patch("builtins.print")
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_ls([])
+
+        mock_get_status_output.assert_called_once()
+        mock_sys_exit.assert_called_once_with(0)
+
     def test_handle_ls(self, mocker):
         """Test handling the ls command."""
         mock_get_status_output = mocker.patch(
@@ -1794,22 +1808,50 @@ class TestMainFunction:
         )
         mock_sys_exit.assert_called_once_with(0)
 
-    def test_handle_remote_ls(self, mocker):
-        """Test handling the remote-ls command."""
+    @pytest.mark.parametrize(
+        "command_args,expected_repo",
+        [
+            (["ghcr.io/test/repo:testing"], "test/repo"),
+            (["docker.io/test/repo:stable"], "test/repo"),
+            (["ghcr.io/another/repo:unstable"], "another/repo"),
+        ],
+    )
+    def test_handle_remote_ls(self, mocker, command_args, expected_repo):
+        """Test handling the remote-ls command with different repository URLs."""
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": ["tag1", "tag2"]}
         mock_client_class = mocker.patch("urh.OCIClient", return_value=mock_client)
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
-        registry._handle_remote_ls(["ghcr.io/test/repo:testing"])
+        registry._handle_remote_ls(command_args)
 
         mock_sys_exit.assert_called_once_with(0)
+        mock_client_class.assert_called_once_with(expected_repo)
+        mock_client.fetch_repository_tags.assert_called_once_with(command_args[0])
 
-        mock_client_class.assert_called_once_with("test/repo")
-        mock_client.fetch_repository_tags.assert_called_once_with(
-            "ghcr.io/test/repo:testing"
-        )
+    @pytest.mark.parametrize("scenario_type", ["success", "failure"])
+    @pytest.mark.parametrize("command", ["check", "upgrade", "rollback"])
+    def test_command_handlers_with_scenarios(self, mocker, command, scenario_type):
+        """Test command handlers with different execution scenarios."""
+        # Set up the mocks based on scenario type
+        mock_run_command = mocker.patch("urh.run_command")
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        if scenario_type == "success":
+            mock_run_command.return_value = 0
+        elif scenario_type == "failure":
+            mock_run_command.return_value = 1
+
+        registry = CommandRegistry()
+        handler = getattr(registry, f"_handle_{command}")
+        handler([])
+
+        # Verify that the appropriate mocks were called appropriately based on scenario
+        if scenario_type == "success":
+            mock_sys_exit.assert_called_once_with(0)
+        else:  # failure
+            mock_sys_exit.assert_called_once_with(1)
 
     @pytest.mark.parametrize(
         "command,cmd_suffix,expected_cmd",

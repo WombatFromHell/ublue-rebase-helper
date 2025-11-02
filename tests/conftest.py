@@ -766,6 +766,44 @@ def create_mock_list_item():
 
 
 @pytest.fixture
+def deployment_builder():
+    """Builder for creating deployment test data."""
+
+    class DeploymentBuilder:
+        def __init__(self):
+            self.deployments = []
+
+        def add_deployment(
+            self,
+            deployment_index: Optional[int] = None,
+            is_current: bool = False,
+            is_pinned: bool = False,
+            repository: str = "test-repo",
+            version: str = "v1.0.0",
+        ):
+            current_idx = (
+                deployment_index
+                if deployment_index is not None
+                else len(self.deployments)
+            )
+            self.deployments.append(
+                DeploymentInfo(
+                    deployment_index=current_idx,
+                    is_current=is_current,
+                    is_pinned=is_pinned,
+                    repository=repository,
+                    version=version,
+                )
+            )
+            return self
+
+        def build(self):
+            return self.deployments
+
+    return DeploymentBuilder()
+
+
+@pytest.fixture
 def create_mock_repository_config():
     """Factory fixture for creating mock repository configs."""
 
@@ -792,3 +830,244 @@ def create_mock_repository_config():
         )
 
     return _factory
+
+
+@pytest.fixture
+def mock_sys_argv_context(mocker):
+    """Context manager for safe sys.argv manipulation."""
+    import sys
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _context(args):
+        original = sys.argv
+        sys.argv = args
+        try:
+            yield
+        finally:
+            sys.argv = original
+
+    return _context
+
+
+@pytest.fixture
+def oci_client_scenario(request, mocker):
+    """Indirect fixture for OCI client test scenarios."""
+    scenario = getattr(request, "param", "default")
+    if scenario == "default":
+        tags = ["tag1", "tag2"]
+        pagination = False
+        token_valid = True
+    elif scenario == "with_pagination":
+        tags = ["tag1", "tag2", "tag3", "tag4"]
+        pagination = True
+        token_valid = True
+    elif scenario == "invalid_token":
+        tags = ["tag1"]
+        pagination = False
+        token_valid = False
+    else:  # default case
+        tags = ["tag1", "tag2"]
+        pagination = False
+        token_valid = True
+
+    # Create appropriate mock setup based on scenario
+    mock_get_all_tags = mocker.patch("urh.OCIClient.get_all_tags")
+    mock_get_all_tags.return_value = {"tags": tags}
+
+    return {
+        "get_all_tags": mock_get_all_tags,
+        "tags": tags,
+        "pagination": pagination,
+        "token_valid": token_valid,
+    }
+
+
+@pytest.fixture(
+    params=[
+        {"tags": ["tag1"], "pagination": False, "token_valid": True},
+        {"tags": ["tag1", "tag2"], "pagination": True, "token_valid": False},
+    ]
+)
+def oci_scenario_param(request):
+    """Parametrized OCI client scenario for indirect parametrization."""
+    return request.param
+
+
+def assert_command_called_with_sudo(mock_run_command, base_cmd):
+    """Assert command was called with sudo prefix."""
+    expected = ["sudo"] + base_cmd
+    mock_run_command.assert_called_once_with(expected)
+
+
+def assert_deployment_filtered(result, included, excluded):
+    """Assert deployment filtering results."""
+    if "tags" in result:
+        for tag in included:
+            assert tag in result["tags"], f"Expected {tag} in results"
+        for tag in excluded:
+            assert tag not in result["tags"], f"Unexpected {tag} in results"
+    else:
+        # Handle case where result is a list
+        for tag in included:
+            assert tag in result, f"Expected {tag} in results"
+        for tag in excluded:
+            assert tag not in result, f"Unexpected {tag} in results"
+
+
+@pytest.fixture
+def command_assertions():
+    """Provides custom assertion helpers for command testing."""
+    return {
+        "assert_command_called_with_sudo": assert_command_called_with_sudo,
+        "assert_deployment_filtered": assert_deployment_filtered,
+    }
+
+
+@pytest.fixture
+def mock_deployment_scenario(mocker, create_mock_deployment_info):
+    """Complete deployment testing scenario with all necessary mocks."""
+
+    def _factory(num_deployments=2, current_idx=0, pinned_indices=None):
+        deployments = [
+            create_mock_deployment_info(
+                deployment_index=i,
+                is_current=(i == current_idx),
+                is_pinned=(i in (pinned_indices or [])),
+            )
+            for i in range(num_deployments)
+        ]
+
+        mock_get = mocker.patch("urh.get_deployment_info", return_value=deployments)
+        mock_current = mocker.patch(
+            "urh.get_current_deployment_info",
+            return_value={
+                "repository": deployments[current_idx].repository,
+                "version": deployments[current_idx].version,
+            },
+        )
+        mock_header = mocker.patch(
+            "urh.format_deployment_header",
+            return_value=f"Current deployment: {deployments[current_idx].repository} ({deployments[current_idx].version})",
+        )
+        mock_run = mocker.patch("urh.run_command", return_value=0)
+        mock_exit = mocker.patch("sys.exit")
+
+        return {
+            "deployments": deployments,
+            "mocks": {
+                "get_deployment_info": mock_get,
+                "get_current_deployment_info": mock_current,
+                "format_deployment_header": mock_header,
+                "run_command": mock_run,
+                "sys_exit": mock_exit,
+            },
+        }
+
+    return _factory
+
+
+@pytest.fixture
+def command_execution_result(request, mocker):
+    """Parametrized fixture for different command execution outcomes."""
+    scenario = getattr(request, "param", "success")
+    if scenario == "success":
+        return mocker.patch("urh.run_command", return_value=0)
+    elif scenario == "failure":
+        return mocker.patch("urh.run_command", return_value=1)
+    elif scenario == "not_found":
+        return mocker.patch("urh.run_command", side_effect=FileNotFoundError)
+    elif scenario == "timeout":
+        import subprocess
+
+        return mocker.patch(
+            "urh.run_command", side_effect=subprocess.TimeoutExpired("cmd", 30)
+        )
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(
+            ("testing", ["testing-42.20231115.0"], ["stable-42.20231115.0"]),
+            id="testing-context",
+        ),
+        pytest.param(
+            ("stable", ["stable-42.20231115.0"], ["testing-42.20231115.0"]),
+            id="stable-context",
+        ),
+        pytest.param(
+            ("unstable", ["unstable-43.20231120.0"], ["testing-42.20231115.0"]),
+            id="unstable-context",
+        ),
+    ]
+)
+def context_filtering_scenarios(request):
+    """Parametrized scenarios for context filtering tests."""
+    return request.param
+
+
+@pytest.fixture
+def oci_client_execution_scenario(request, mocker):
+    """Parametrized fixture for different OCI client execution scenarios."""
+    scenario = getattr(request, "param", "success")
+
+    mock_get_all_tags = mocker.patch("urh.OCIClient.get_all_tags")
+    mock_fetch_page = mocker.patch("urh.OCIClient._fetch_page")
+    mock_get_link_header = mocker.patch("urh.OCIClient._get_link_header")
+
+    if scenario == "success":
+        mock_get_all_tags.return_value = {"tags": ["tag1", "tag2"]}
+        mock_fetch_page.return_value = {"tags": ["tag1", "tag2"]}
+        mock_get_link_header.return_value = None
+    elif scenario == "with_pagination":
+        mock_get_all_tags.return_value = {"tags": ["tag1", "tag2", "tag3", "tag4"]}
+        mock_fetch_page.side_effect = [
+            {"tags": ["tag1", "tag2"]},
+            {"tags": ["tag3", "tag4"]},
+        ]
+        mock_get_link_header.return_value = (
+            '</v2/test/repo/tags/list?last=tag2&n=200>; rel="next"'
+        )
+    elif scenario == "no_data":
+        mock_get_all_tags.return_value = None
+    elif scenario == "empty_tags":
+        mock_get_all_tags.return_value = {"tags": []}
+
+    return {
+        "get_all_tags": mock_get_all_tags,
+        "fetch_page": mock_fetch_page,
+        "get_link_header": mock_get_link_header,
+    }
+
+
+@pytest.fixture
+def command_handler_scenario(request, mocker):
+    """Parametrized fixture for command handler scenarios."""
+    scenario = getattr(request, "param", "success")
+
+    mock_run_command = mocker.patch("urh.run_command")
+    mock_sys_exit = mocker.patch("sys.exit")
+
+    if scenario == "success":
+        mock_run_command.return_value = 0
+    elif scenario == "failure":
+        mock_run_command.return_value = 1
+    elif scenario == "timeout":
+        import subprocess
+
+        mock_run_command.side_effect = subprocess.TimeoutExpired("cmd", 30)
+
+    return {"run_command": mock_run_command, "sys_exit": mock_sys_exit}
+
+
+@pytest.fixture(
+    params=[
+        ("ghcr.io/user/repo:testing", "user/repo", "testing"),
+        ("ghcr.io/user/repo:stable", "user/repo", "stable"),
+        ("ghcr.io/user/repo:unstable", "user/repo", "unstable"),
+        ("ghcr.io/astrovm/amyos:latest", "astrovm/amyos", "latest"),
+    ]
+)
+def url_extraction_scenarios(request):
+    """Parametrized scenarios for URL extraction tests."""
+    return request.param

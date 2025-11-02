@@ -308,6 +308,87 @@ class TestCommandWorkflows:
         mock_run_command.assert_called_once_with(expected_cmd)
         mock_sys_exit.assert_called_once_with(0)
 
+    @pytest.mark.parametrize(
+        "command, is_pinned, menu_selection",
+        [
+            ("pin", False, "0"),  # Pin an unpinned deployment
+            ("unpin", True, "0"),  # Unpin a pinned deployment
+            ("rm", False, "0"),  # Remove any deployment
+        ],
+    )
+    def test_deployment_command_workflows_with_menu(
+        self, mocker, command, is_pinned, menu_selection, sample_deployment_info
+    ):
+        """Test complete deployment command workflows with menu."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+        mock_get_current_deployment_info = mocker.patch(
+            "urh.get_current_deployment_info"
+        )
+        mock_format_deployment_header = mocker.patch("urh.format_deployment_header")
+        mock_menu_system = mocker.patch("urh._menu_system")
+
+        # Create appropriate deployment sample for the command type
+        if command == "unpin":
+            # Create a sample with at least one pinned deployment for unpin command
+            deployment_with_pinned = [
+                DeploymentInfo(
+                    deployment_index=0,
+                    is_current=True,
+                    repository="bazzite-nix",
+                    version="42.20231115.0",
+                    is_pinned=True,  # Pinned for unpin command
+                )
+            ]
+            deployments = deployment_with_pinned
+        elif command == "pin":
+            # Create a sample with at least one unpinned deployment for pin command
+            deployment_with_unpinned = [
+                DeploymentInfo(
+                    deployment_index=0,
+                    is_current=True,
+                    repository="bazzite-nix",
+                    version="42.20231115.0",
+                    is_pinned=False,  # Unpinned for pin command
+                )
+            ]
+            deployments = deployment_with_unpinned
+        else:  # rm command
+            # Use sample deployment info for rm command
+            deployments = sample_deployment_info
+
+        mocker.patch("urh.get_deployment_info", return_value=deployments)
+
+        # Mock current deployment info
+        current_deployment_info = {
+            "repository": "bazzite-nix",
+            "version": "42.20231115.0",
+        }
+        mock_get_current_deployment_info.return_value = current_deployment_info
+        mock_format_deployment_header.return_value = (
+            "Current deployment: bazzite-nix (42.20231115.0)"
+        )
+
+        # Mock menu selection
+        mock_menu_system.show_menu.return_value = menu_selection
+
+        registry = CommandRegistry()
+        handler = getattr(registry, f"_handle_{command}")
+        handler([])
+
+        # Determine expected command based on command type
+        if command == "pin":
+            expected_cmd = ["sudo", "ostree", "admin", "pin", menu_selection]
+        elif command == "unpin":
+            expected_cmd = ["sudo", "ostree", "admin", "pin", "-u", menu_selection]
+        elif command == "rm":
+            expected_cmd = ["sudo", "rpm-ostree", "cleanup", "-r", menu_selection]
+        else:
+            expected_cmd = []
+
+        mock_run_command.assert_called_once_with(expected_cmd)
+        mock_sys_exit.assert_called_once_with(0)
+
     def test_pin_command_workflow_with_menu(self, mocker, sample_deployment_info):
         """Test complete pin command workflow with menu."""
         mock_get_deployment_info = mocker.patch("urh.get_deployment_info")
