@@ -66,6 +66,7 @@ class CommandType(StrEnum):
     """Enumeration of available commands."""
 
     CHECK = "check"
+    KARGS = "kargs"
     LS = "ls"
     PIN = "pin"
     REBASE = "rebase"
@@ -1762,6 +1763,12 @@ class CommandRegistry:
                 handler=self._handle_check,
                 requires_sudo=False,
             ),
+            "kargs": CommandDefinition(
+                name="kargs",
+                description="Manage kernel arguments (kargs)",
+                handler=self._handle_kargs,
+                requires_sudo=True,
+            ),
             "ls": CommandDefinition(
                 name="ls",
                 description="List deployments with details",
@@ -1840,6 +1847,12 @@ class CommandRegistry:
             sys.exit(0)
         else:
             sys.exit(1)
+
+    def _handle_kargs(self, args: List[str]) -> None:
+        """Handle the kargs command."""
+        cmd = ["sudo", "rpm-ostree", "kargs"]
+        cmd.extend(args)
+        sys.exit(run_command(cmd))
 
     def _handle_rebase(self, args: List[str]) -> None:
         """Handle the rebase command."""

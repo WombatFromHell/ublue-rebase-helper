@@ -1064,7 +1064,10 @@ class TestOCIClient:
         mock_fetch_with_headers = mocker.patch.object(
             OCIClient, "_fetch_page_with_headers"
         )
-        mock_fetch_with_headers.return_value = ({"tags": ["tag1", "tag2"]}, None)  # No next page
+        mock_fetch_with_headers.return_value = (
+            {"tags": ["tag1", "tag2"]},
+            None,
+        )  # No next page
 
         client = OCIClient("test/repo")
         result = client.get_all_tags()
@@ -1092,7 +1095,7 @@ class TestOCIClient:
         # First call returns a next_url, second call returns None
         mock_token_manager.parse_link_header.side_effect = [
             "/v2/test/repo/tags/list?last=tag2&n=200",  # First call
-            None  # Second call
+            None,  # Second call
         ]
 
         # Mock the _validate_token_and_retry method to return the token
@@ -1105,7 +1108,10 @@ class TestOCIClient:
             OCIClient, "_fetch_page_with_headers"
         )
         mock_fetch_with_headers.side_effect = [
-            ({"tags": ["tag1", "tag2"]}, "/v2/test/repo/tags/list?last=tag2&n=200"),  # First page with next URL
+            (
+                {"tags": ["tag1", "tag2"]},
+                "/v2/test/repo/tags/list?last=tag2&n=200",
+            ),  # First page with next URL
             ({"tags": ["tag3", "tag4"]}, None),  # Second page, no next URL
         ]
 
@@ -1183,7 +1189,6 @@ class TestOCIClient:
 
         assert result is None
 
-
     def test_fetch_page_with_headers_success(self, mocker):
         """Test fetching page with headers in single request - success case."""
         client = OCIClient("test/repo")
@@ -1200,7 +1205,9 @@ Link: </v2/test/repo/tags/list?last=tag2&n=200>; rel="next"\r
 
         mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
 
-        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+        result, next_url = client._fetch_page_with_headers(
+            "https://test.url", "test_token"
+        )
 
         assert result == {"tags": ["tag1", "tag2"]}
         assert next_url == "/v2/test/repo/tags/list?last=tag2&n=200"
@@ -1221,7 +1228,9 @@ Content-Type: application/json\r
 
         mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
 
-        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+        result, next_url = client._fetch_page_with_headers(
+            "https://test.url", "test_token"
+        )
 
         assert result == {"tags": ["tag1", "tag2"]}
         assert next_url is None
@@ -1232,13 +1241,17 @@ Content-Type: application/json\r
         client = OCIClient("test/repo")
 
         import subprocess
+
         mock_subprocess = mocker.patch(
-            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["curl"], timeout=30)
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["curl"], timeout=30),
         )
         # Mock the logger to capture log calls
         mock_logger_error = mocker.patch("urh.logger.error")
 
-        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+        result, next_url = client._fetch_page_with_headers(
+            "https://test.url", "test_token"
+        )
 
         assert result is None
         assert next_url is None
@@ -1263,7 +1276,9 @@ invalid json"""
         # Mock the logger to capture log calls
         mock_logger_error = mocker.patch("urh.logger.error")
 
-        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+        result, next_url = client._fetch_page_with_headers(
+            "https://test.url", "test_token"
+        )
 
         assert result is None
         assert next_url is None
@@ -1283,7 +1298,9 @@ invalid json"""
         mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
         mock_print = mocker.patch("builtins.print")
 
-        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+        result, next_url = client._fetch_page_with_headers(
+            "https://test.url", "test_token"
+        )
 
         assert result is None
         assert next_url is None
@@ -1293,14 +1310,16 @@ invalid json"""
         client = OCIClient("test/repo")
 
         # Response using LF line endings - with correctly formatted JSON
-        response_content = "HTTP/2 200 OK\nContent-Type: application/json\nLink: </v2/test/repo/tags/list?last=tag2&n=200>; rel=\"next\"\n\n{\"tags\": [\"tag1\", \"tag2\"]}"
+        response_content = 'HTTP/2 200 OK\nContent-Type: application/json\nLink: </v2/test/repo/tags/list?last=tag2&n=200>; rel="next"\n\n{"tags": ["tag1", "tag2"]}'
 
         mock_result = mocker.MagicMock()
         mock_result.stdout = response_content
 
         mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
 
-        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+        result, next_url = client._fetch_page_with_headers(
+            "https://test.url", "test_token"
+        )
 
         assert result == {"tags": ["tag1", "tag2"]}
         assert next_url == "/v2/test/repo/tags/list?last=tag2&n=200"
@@ -1323,7 +1342,10 @@ invalid json"""
         mock_fetch_with_headers = mocker.patch.object(
             OCIClient, "_fetch_page_with_headers"
         )
-        mock_fetch_with_headers.return_value = ({"tags": ["tag1", "tag2"]}, None)  # No next page
+        mock_fetch_with_headers.return_value = (
+            {"tags": ["tag1", "tag2"]},
+            None,
+        )  # No next page
 
         client = OCIClient("test/repo")
         result = client.get_all_tags()
@@ -1340,7 +1362,7 @@ invalid json"""
         # First call returns a next_url, second call returns None
         mock_token_manager.parse_link_header.side_effect = [
             "/v2/test/repo/tags/list?last=tag2&n=200",  # First call
-            None  # Second call
+            None,  # Second call
         ]
 
         mocker.patch("urh.OCITokenManager", return_value=mock_token_manager)
@@ -1355,7 +1377,10 @@ invalid json"""
             OCIClient, "_fetch_page_with_headers"
         )
         mock_fetch_with_headers.side_effect = [
-            ({"tags": ["tag1", "tag2"]}, "/v2/test/repo/tags/list?last=tag2&n=200"),  # First page with next URL
+            (
+                {"tags": ["tag1", "tag2"]},
+                "/v2/test/repo/tags/list?last=tag2&n=200",
+            ),  # First page with next URL
             ({"tags": ["tag3", "tag4"]}, None),  # Second page, no next URL
         ]
 
@@ -1557,7 +1582,20 @@ class TestCommandRegistry:
     def test_init(self):
         """Test CommandRegistry initialization."""
         registry = CommandRegistry()
-        assert len(registry.get_commands()) == 9  # Number of commands in the registry
+        assert len(registry.get_commands()) == 10  # Number of commands in the registry
+
+    def test_handle_kargs_with_args(self, mocker):
+        """Test handling the kargs command with arguments."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs(["--append=console=ttyS0", "--delete=quiet"])
+
+        mock_run_command.assert_called_once_with(
+            ["sudo", "rpm-ostree", "kargs", "--append=console=ttyS0", "--delete=quiet"]
+        )
+        mock_sys_exit.assert_called_once_with(0)
 
 
 class TestMainFunction:
@@ -1685,7 +1723,7 @@ class TestMainFunction:
         registry = CommandRegistry()
         commands = registry.get_commands()
 
-        assert len(commands) == 9
+        assert len(commands) == 10
         command_names = [cmd.name for cmd in commands]
         assert "check" in command_names
         assert "ls" in command_names
@@ -1864,7 +1902,7 @@ class TestMainFunction:
         mock_client.fetch_repository_tags.assert_called_once_with(command_args[0])
 
     @pytest.mark.parametrize("scenario_type", ["success", "failure"])
-    @pytest.mark.parametrize("command", ["check", "upgrade", "rollback"])
+    @pytest.mark.parametrize("command", ["check", "kargs", "upgrade", "rollback"])
     def test_command_handlers_with_scenarios(self, mocker, command, scenario_type):
         """Test command handlers with different execution scenarios."""
         # Set up the mocks based on scenario type

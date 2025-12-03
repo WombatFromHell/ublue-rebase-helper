@@ -53,10 +53,10 @@ This utility is designed to:
 - **Function**: Check for available updates without applying them
 - **Requires sudo**: No
 
-#### `upgrade`
+#### `kargs`
 
-- **Wraps**: `sudo rpm-ostree upgrade`
-- **Function**: Upgrade the system to the latest available version
+- **Wraps**: `sudo rpm-ostree kargs ...`
+- **Function**: Manage kernel arguments (kargs) by passing all arguments to the underlying rpm-ostree kargs command
 - **Requires sudo**: Yes
 
 #### `ls`
