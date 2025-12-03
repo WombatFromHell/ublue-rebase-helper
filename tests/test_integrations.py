@@ -121,16 +121,14 @@ class TestOCIIntegration:
             f.write(mock_token)
 
         # Mock the internal methods that make curl calls for tag fetching
-        mock_fetch_page = mocker.patch.object(
-            OCIClient, "_fetch_page", return_value=mock_tags_data
+        # Use the new optimized single-request method
+        mock_fetch_page_with_headers = mocker.patch.object(
+            OCIClient, "_fetch_page_with_headers", return_value=(mock_tags_data, None)
         )
         # Mock the token validation to return the same token
         mock_validate_token = mocker.patch.object(
             OCIClient, "_validate_token_and_retry", return_value=mock_token
         )
-        mock_get_link_header = mocker.patch.object(
-            OCIClient, "_get_link_header", return_value=None
-        )  # No pagination
 
         client = OCIClient("test/repo", cache_path=temp_cache_file)
         result = client.get_all_tags()

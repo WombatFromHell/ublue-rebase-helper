@@ -231,19 +231,22 @@ The implementation uses several type aliases for better type safety:
 The `OCIClient` class provides functionality for interacting with OCI Container Registries such as ghcr.io:
 
 - **Token Management**: Uses `OCITokenManager` for OAuth2 authentication with token caching to `/tmp/` using a single shared filename (`/tmp/oci_ghcr_token`) for all GHCR requests
-- **Pagination Support**: Implements Link header following to retrieve all tags beyond the initial 200 limit by parsing Link headers like `Link: </v2/user/repo/tags/list?last=tag_value&n=200>; rel="next"` and continuing until no more next links are present
+- **Pagination Support**: Implements optimized Link header following to retrieve all tags beyond the initial 200 limit by parsing Link headers like `Link: </v2/user/repo/tags/list?last=tag_value&n=200>; rel="next"` and continuing until no more next links are present. NEW: Uses a single-request-per-page approach with `_fetch_page_with_headers()` that retrieves both the page data and Link header in a single curl request for improved performance
 - **Tag Processing**: Includes filtering, sorting, and deduplication logic for container image tags through the `OCITagFilter` class
 - **Error Handling**: Includes retry mechanisms for expired/invalid tokens, with validation of token before use and automatic refresh when needed
-- **HTTP Headers**: Uses curl to fetch headers and process Link headers for pagination
+- **HTTP Headers**: Uses curl with `-i` flag to fetch headers and response body in single request, improving performance by eliminating the need for additional header-only requests
 - **Caching Mechanism**: Implements token caching with `OCITokenManager` that caches tokens to a shared file for reuse across sessions
 - **Token Validation**: Performs proactive token validation and refresh when a 403 (Forbidden) error is encountered
-- **Header Processing**: Manages HTTP headers using temporary files to fetch and parse Link headers for pagination
-- **Page Fetching**: Uses curl with proper authorization headers to fetch individual pages of tags
+- **Header Processing**: Manages HTTP headers by parsing the combined response from curl's `-i` flag to extract Link headers for pagination
+- **Page Fetching**: Uses curl with proper authorization headers to fetch individual pages of tags, including both JSON response and headers in single request
 - **URL Handling**: Properly handles relative and absolute URLs when following pagination links
 - **Logging**: Uses structured logging instead of print statements for better debuggability
 - **Timeout Protection**: Implements timeout protection for curl operations (30 seconds default)
 - **CurlResult**: Uses `NamedTuple` to structure curl operation results
-- **Performance Optimizations**: Added `functools.lru_cache` for compiled regex patterns to improve performance (maxsize=128)
+- **Performance Optimizations**: Added `functools.lru_cache` for compiled regex patterns to improve performance (maxsize=128) and optimized single-request approach for pagination that fetches both data and headers in one call
+- **HTTP/2 Support**: Uses `--http2` flag with curl for improved performance when available
+- **Single-Request Pagination**: The `_fetch_page_with_headers()` method fetches both page data and Link header in a single curl request, significantly improving pagination performance by eliminating separate header requests
+- **Robust Header Parsing**: Handles various line ending formats (CRLF/LF) when parsing response headers and bodies to ensure compatibility across different environments
 
 ### OCITagFilter Implementation
 

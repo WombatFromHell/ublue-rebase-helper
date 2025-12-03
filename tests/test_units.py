@@ -1060,18 +1060,17 @@ class TestOCIClient:
             OCIClient, "_validate_token_and_retry", return_value="test_token"
         )
 
-        # Mock subprocess.run for fetching tags
-        mock_subprocess = mocker.patch("subprocess.run")
-        mock_subprocess.return_value.stdout = json.dumps({"tags": ["tag1", "tag2"]})
-
-        # Mock the _get_link_header method to return None (no pagination)
-        mocker.patch.object(OCIClient, "_get_link_header", return_value=None)
+        # Use the new optimized single-request method that fetches data and headers together
+        mock_fetch_with_headers = mocker.patch.object(
+            OCIClient, "_fetch_page_with_headers"
+        )
+        mock_fetch_with_headers.return_value = ({"tags": ["tag1", "tag2"]}, None)  # No next page
 
         client = OCIClient("test/repo")
         result = client.get_all_tags()
 
         assert result == {"tags": ["tag1", "tag2"]}
-        mock_token_manager.get_token.assert_called_once()
+        mock_fetch_with_headers.assert_called_once()
 
     def test_get_all_tags_no_token(self, mocker):
         """Test getting all tags when token is not available."""
@@ -1090,29 +1089,24 @@ class TestOCIClient:
         mock_token_manager = mocker.MagicMock()
         mock_token_manager.get_token.return_value = "test_token"
 
+        # First call returns a next_url, second call returns None
+        mock_token_manager.parse_link_header.side_effect = [
+            "/v2/test/repo/tags/list?last=tag2&n=200",  # First call
+            None  # Second call
+        ]
+
         # Mock the _validate_token_and_retry method to return the token
         mocker.patch.object(
             OCIClient, "_validate_token_and_retry", return_value="test_token"
         )
 
-        # Mock subprocess.run for pagination
-        mock_subprocess = mocker.patch("subprocess.run")
-
-        # First call returns first page
-        first_response = mocker.MagicMock()
-        first_response.stdout = json.dumps({"tags": ["tag1", "tag2"]})
-
-        # Second call returns second page
-        second_response = mocker.MagicMock()
-        second_response.stdout = json.dumps({"tags": ["tag3", "tag4"]})
-
-        mock_subprocess.side_effect = [first_response, second_response]
-
-        # Mock the _get_link_header method to return the Link header for first call, None for second
-        mock_link_header = mocker.patch.object(OCIClient, "_get_link_header")
-        mock_link_header.side_effect = [
-            '</v2/test/repo/tags/list?last=tag2&n=200>; rel="next"',
-            None,
+        # Mock the new optimized method for multiple responses
+        mock_fetch_with_headers = mocker.patch.object(
+            OCIClient, "_fetch_page_with_headers"
+        )
+        mock_fetch_with_headers.side_effect = [
+            ({"tags": ["tag1", "tag2"]}, "/v2/test/repo/tags/list?last=tag2&n=200"),  # First page with next URL
+            ({"tags": ["tag3", "tag4"]}, None),  # Second page, no next URL
         ]
 
         mocker.patch("urh.OCITokenManager", return_value=mock_token_manager)
@@ -1189,9 +1183,131 @@ class TestOCIClient:
 
         assert result is None
 
-    def test_get_all_tags_with_pagination_single_page(self, mocker):
-        """Test getting all tags with pagination using internal methods (single page)."""
-        # Mock the token manager
+
+    def test_fetch_page_with_headers_success(self, mocker):
+        """Test fetching page with headers in single request - success case."""
+        client = OCIClient("test/repo")
+
+        # Create mock response with headers and body
+        response_content = """HTTP/2 200 OK\r
+Content-Type: application/json\r
+Link: </v2/test/repo/tags/list?last=tag2&n=200>; rel="next"\r
+\r
+{"tags": ["tag1", "tag2"]}"""
+
+        mock_result = mocker.MagicMock()
+        mock_result.stdout = response_content
+
+        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
+
+        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+
+        assert result == {"tags": ["tag1", "tag2"]}
+        assert next_url == "/v2/test/repo/tags/list?last=tag2&n=200"
+        mock_subprocess.assert_called_once()
+
+    def test_fetch_page_with_headers_no_next_link(self, mocker):
+        """Test fetching page with headers when there's no next link."""
+        client = OCIClient("test/repo")
+
+        # Create mock response with headers and body, but no next link
+        response_content = """HTTP/2 200 OK\r
+Content-Type: application/json\r
+\r
+{"tags": ["tag1", "tag2"]}"""
+
+        mock_result = mocker.MagicMock()
+        mock_result.stdout = response_content
+
+        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
+
+        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+
+        assert result == {"tags": ["tag1", "tag2"]}
+        assert next_url is None
+        mock_subprocess.assert_called_once()
+
+    def test_fetch_page_with_headers_timeout(self, mocker):
+        """Test fetching page with headers when request times out."""
+        client = OCIClient("test/repo")
+
+        import subprocess
+        mock_subprocess = mocker.patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["curl"], timeout=30)
+        )
+        # Mock the logger to capture log calls
+        mock_logger_error = mocker.patch("urh.logger.error")
+
+        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+
+        assert result is None
+        assert next_url is None
+        # Should log the timeout error
+        mock_logger_error.assert_called_with("Timeout fetching page: https://test.url")
+
+    def test_fetch_page_with_headers_json_error(self, mocker):
+        """Test fetching page with headers when JSON parsing fails."""
+        client = OCIClient("test/repo")
+
+        # Response with valid headers but invalid JSON body
+        response_content = """HTTP/2 200 OK\r
+Content-Type: application/json\r
+Link: </v2/test/repo/tags/list?last=tag2&n=200>; rel="next"\r
+\r
+invalid json"""
+
+        mock_result = mocker.MagicMock()
+        mock_result.stdout = response_content
+
+        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
+        # Mock the logger to capture log calls
+        mock_logger_error = mocker.patch("urh.logger.error")
+
+        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+
+        assert result is None
+        assert next_url is None
+        # Should log the JSON error
+        mock_logger_error.assert_called()
+
+    def test_fetch_page_with_headers_malformed_response(self, mocker):
+        """Test fetching page with headers when response format is invalid."""
+        client = OCIClient("test/repo")
+
+        # Completely malformed response
+        response_content = "completely invalid response format"
+
+        mock_result = mocker.MagicMock()
+        mock_result.stdout = response_content
+
+        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
+        mock_print = mocker.patch("builtins.print")
+
+        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+
+        assert result is None
+        assert next_url is None
+
+    def test_fetch_page_with_headers_lf_line_endings(self, mocker):
+        """Test fetching page with headers when using LF instead of CRLF line endings."""
+        client = OCIClient("test/repo")
+
+        # Response using LF line endings - with correctly formatted JSON
+        response_content = "HTTP/2 200 OK\nContent-Type: application/json\nLink: </v2/test/repo/tags/list?last=tag2&n=200>; rel=\"next\"\n\n{\"tags\": [\"tag1\", \"tag2\"]}"
+
+        mock_result = mocker.MagicMock()
+        mock_result.stdout = response_content
+
+        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
+
+        result, next_url = client._fetch_page_with_headers("https://test.url", "test_token")
+
+        assert result == {"tags": ["tag1", "tag2"]}
+        assert next_url == "/v2/test/repo/tags/list?last=tag2&n=200"
+        mock_subprocess.assert_called_once()
+
+    def test_get_all_tags_single_request_pagination(self, mocker):
+        """Test get_all_tags uses the single-request pagination approach."""
         mock_token_manager = mocker.MagicMock()
         mock_token_manager.get_token.return_value = "test_token"
         mock_token_manager.parse_link_header.return_value = None
@@ -1203,29 +1319,28 @@ class TestOCIClient:
             OCIClient, "_validate_token_and_retry", return_value="test_token"
         )
 
-        # Mock fetching pages
-        mock_fetch_page = mocker.patch.object(OCIClient, "_fetch_page")
-        mock_fetch_page.return_value = {"tags": ["tag1", "tag2"]}
-
-        # Mock getting link headers
-        mock_get_link_header = mocker.patch.object(
-            OCIClient, "_get_link_header", return_value=None
+        # Mock the new optimized method that fetches data and headers in single request
+        mock_fetch_with_headers = mocker.patch.object(
+            OCIClient, "_fetch_page_with_headers"
         )
+        mock_fetch_with_headers.return_value = ({"tags": ["tag1", "tag2"]}, None)  # No next page
 
         client = OCIClient("test/repo")
         result = client.get_all_tags()
 
         assert result == {"tags": ["tag1", "tag2"]}
-        mock_fetch_page.assert_called_once()
+        mock_fetch_with_headers.assert_called_once()
+        # Verify the old methods are not being called
+        # The new implementation should only use _fetch_page_with_headers
 
-    def test_get_all_tags_pagination_multiple_pages(self, mocker):
-        """Test getting all tags with multiple pages of pagination."""
-        # Mock the token manager
+    def test_get_all_tags_multiple_pages_single_request(self, mocker):
+        """Test get_all_tags with multiple pages using single-request pagination."""
         mock_token_manager = mocker.MagicMock()
         mock_token_manager.get_token.return_value = "test_token"
+        # First call returns a next_url, second call returns None
         mock_token_manager.parse_link_header.side_effect = [
-            "/v2/test/repo/tags/list?last=tag2&n=200",
-            None,  # No more pages after the first
+            "/v2/test/repo/tags/list?last=tag2&n=200",  # First call
+            None  # Second call
         ]
 
         mocker.patch("urh.OCITokenManager", return_value=mock_token_manager)
@@ -1235,102 +1350,20 @@ class TestOCIClient:
             OCIClient, "_validate_token_and_retry", return_value="test_token"
         )
 
-        # Mock fetching multiple pages
-        mock_fetch_page = mocker.patch.object(OCIClient, "_fetch_page")
-        mock_fetch_page.side_effect = [
-            {"tags": ["tag1", "tag2"]},
-            {"tags": ["tag3", "tag4"]},
-        ]
-
-        # Mock getting link headers
-        mock_get_link_header = mocker.patch.object(OCIClient, "_get_link_header")
-        mock_get_link_header.side_effect = [
-            '</v2/test/repo/tags/list?last=tag2&n=200>; rel="next"',
-            None,  # No more next links
+        # Mock the new optimized method for multiple responses
+        mock_fetch_with_headers = mocker.patch.object(
+            OCIClient, "_fetch_page_with_headers"
+        )
+        mock_fetch_with_headers.side_effect = [
+            ({"tags": ["tag1", "tag2"]}, "/v2/test/repo/tags/list?last=tag2&n=200"),  # First page with next URL
+            ({"tags": ["tag3", "tag4"]}, None),  # Second page, no next URL
         ]
 
         client = OCIClient("test/repo")
         result = client.get_all_tags()
 
         assert result == {"tags": ["tag1", "tag2", "tag3", "tag4"]}
-        assert mock_fetch_page.call_count == 2
-
-    def test_get_link_header_errors(self, mocker):
-        """Test getting link header with various error conditions."""
-        # Test when subprocess raises a SubprocessError
-        import subprocess
-
-        mock_subprocess = mocker.patch(
-            "subprocess.run", side_effect=subprocess.SubprocessError("Network error")
-        )
-        mock_print = mocker.patch("builtins.print")
-
-        client = OCIClient("test/repo")
-        result = client._get_link_header("https://test.url", "test_token")
-
-        assert result is None
-        mock_print.assert_called_with("Warning: Could not get headers: Network error")
-
-    def test_get_link_header_io_errors(self, mocker):
-        """Test getting link header with IO error conditions."""
-        import subprocess
-
-        # Test when subprocess succeeds but file reading fails
-        mock_result = mocker.MagicMock()
-        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
-
-        # Mock opening the file to raise IOError
-        mock_open = mocker.patch("builtins.open", side_effect=IOError("File error"))
-        mock_print = mocker.patch("builtins.print")
-
-        client = OCIClient("test/repo")
-        result = client._get_link_header("https://test.url", "test_token")
-
-        assert result is None
-        mock_print.assert_called_with("Warning: Could not get headers: File error")
-
-    def test_fetch_page_error(self, mocker):
-        """Test fetching a page with error conditions."""
-        client = OCIClient("test/repo")
-
-        # Mock subprocess to raise an exception
-        import subprocess
-
-        mock_subprocess = mocker.patch(
-            "subprocess.run", side_effect=subprocess.SubprocessError("Network error")
-        )
-        mock_print = mocker.patch("builtins.print")
-
-        result = client._fetch_page("https://test.url", "test_token")
-
-        assert result is None
-        mock_print.assert_called_with("Error fetching page: Network error")
-
-    def test_fetch_page_json_error(self, mocker):
-        """Test fetching a page when JSON parsing fails."""
-        client = OCIClient("test/repo")
-
-        # Mock subprocess to return invalid JSON
-        mock_result = mocker.MagicMock()
-        mock_result.stdout = "invalid json"
-
-        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
-        mock_print = mocker.patch("builtins.print")
-
-        # Since this will fail at json.loads, we need to mock differently
-        # Let's directly test the json parsing error scenario
-        import json
-
-        mock_json_loads = mocker.patch(
-            "json.loads", side_effect=json.JSONDecodeError("Test error", "data", 0)
-        )
-        mock_subprocess = mocker.patch("subprocess.run", return_value=mock_result)
-        mock_print = mocker.patch("builtins.print")
-
-        result = client._fetch_page("https://test.url", "test_token")
-
-        assert result is None
-        # json.loads is called inside, which is mocked to raise exception
+        assert mock_fetch_with_headers.call_count == 2
 
 
 class TestMenuSystem:
