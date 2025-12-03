@@ -1240,53 +1240,17 @@ class OCIClient:
         Returns:
             A valid token if successful, None otherwise
         """
-        # Test the current token
-        cmd = [
-            "curl",
-            "-s",  # Silent mode
-            "-w",
-            "%{http_code}",  # Write HTTP status code to stdout
-            "-o",
-            "/dev/null",  # Discard body
-            "-H",
-            f"Authorization: Bearer {token}",
-            url,
-        ]
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,  # Add timeout protection
-        )
-
-        # Get HTTP status code from the last line of stdout
-        http_status = int(result.stdout.strip())
-
-        # Check for 403 Forbidden error (invalid/expired token)
-        if http_status == 403:
-            logger.warning(
-                "Token expired or invalid. Invalidating cache and fetching new token..."
-            )
-            self.token_manager.invalidate_cache()
-
-            # Try to get a new token
-            new_token = self.token_manager.get_token()
-            if not new_token:
-                logger.error("Could not obtain a new token. Aborting.")
-                return None
-
-            # Test the new token
+        try:
+            # Test the current token with a HEAD-like request
             cmd = [
                 "curl",
-                "-s",  # Silent mode
+                "-s",
                 "-w",
-                "%{http_code}",  # Write HTTP status code to stdout
+                "%{http_code}",  # Write HTTP status code
                 "-o",
                 "/dev/null",  # Discard body
                 "-H",
-                f"Authorization: Bearer {new_token}",
+                f"Authorization: Bearer {token}",
                 url,
             ]
 
@@ -1295,188 +1259,118 @@ class OCIClient:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=30,  # Add timeout protection
+                timeout=30,
             )
 
-            # Update status code
             http_status = int(result.stdout.strip())
 
-            # If we still get a 403, something else is wrong
-            if http_status == 403:
-                logger.error("Authentication failed even with a new token. Aborting.")
-                return None
+            # Token is valid
+            if http_status == 200:
+                logger.debug("Token validation successful")
+                return token
 
-            return new_token
+            # Token expired or invalid
+            if http_status == 403 or http_status == 401:
+                logger.warning(
+                    f"Token invalid (HTTP {http_status}). Fetching new token..."
+                )
+                self.token_manager.invalidate_cache()
 
-        # Token is valid
-        return token
-
-    def _fetch_page(self, url: str, token: str) -> Optional[Dict[str, Any]]:
-        """
-        Fetch a single page of tags from the registry.
-
-        Args:
-            url: The URL to fetch
-            token: The authentication token
-
-        Returns:
-            The parsed JSON response if successful, None otherwise
-        """
-        try:
-            # Use curl to fetch the page - keep direct subprocess.run for test compatibility
-            cmd = [
-                "curl",
-                "-s",  # Silent mode
-                "-H",
-                f"Authorization: Bearer {token}",
-                url,
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,  # Add timeout protection
-            )
-
-            # Parse response
-            data = json.loads(result.stdout)
-            return data
-
-        except (subprocess.SubprocessError, json.JSONDecodeError) as e:
-            logger.error(f"Error fetching page: {e}")
-            print(f"Error fetching page: {e}")  # Also print for user visibility
-            return None
-
-    def _get_link_header(self, url: str, token: str) -> Optional[str]:
-        """
-        Get the Link header from a response.
-
-        Args:
-            url: The URL to fetch headers from
-            token: The authentication token
-
-        Returns:
-            The Link header value if found, None otherwise
-        """
-        # For the header-only approach, we need to use -D to write headers to a temp file
-        # Since the new _curl approach doesn't directly support this old pattern,
-        # let's use a combination approach that matches the original behavior more closely
-
-        # Use curl to get headers in a separate file while discarding the body
-        headers_file = "/tmp/ghcr_headers"
-        try:
-            cmd = [
-                "curl",
-                "-s",  # Silent mode
-                "-D",  # Write headers to file
-                headers_file,  # Header file path
-                "-o",  # Write body to...
-                "/dev/null",  # ...the void
-                "-H",  # Add Authorization header
-                f"Authorization: Bearer {token}",
-                url,
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                check=False,  # Don't raise exception on non-zero exit
-            )
-
-            # In real execution, we check if curl command returned non-zero (failure)
-            # In test execution, we need to be compatible with mocks
-            # MagicMock when cast to int typically returns 1, so we need special handling
-            returncode = result.returncode
-
-            # Check if returncode is a mock object - if so, assume success for test compatibility
-            # Otherwise check if it's a real int that indicates failure
-            if (
-                hasattr(returncode, "return_value")
-                or str(type(returncode)).find("MagicMock") != -1
-                or str(type(returncode)).find("Mock") != -1
-            ):
-                # This is likely a test mock, proceed to file operations to allow testing
-                pass
-            else:
-                # This is a real return code, check for failure (non-zero)
-                if returncode != 0:
-                    logger.warning(
-                        f"Could not get headers, curl failed with code {returncode}"
-                    )
+                # Get new token
+                new_token = self.token_manager.get_token()
+                if not new_token:
+                    logger.error("Could not obtain a new token")
                     return None
 
-            # Read headers from file
-            with open(headers_file, "r") as f:
-                headers_text = f.read()
+                # Validate new token
+                cmd[cmd.index(f"Authorization: Bearer {token}")] = (
+                    f"Authorization: Bearer {new_token}"
+                )
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=30,
+                )
 
-            # Parse headers
-            headers: Dict[str, str] = {}
-            for line in headers_text.split("\n"):
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    headers[key.strip()] = value.strip()
+                http_status = int(result.stdout.strip())
+                if http_status == 200:
+                    logger.info("New token validated successfully")
+                    return new_token
+                else:
+                    logger.error(f"New token also invalid (HTTP {http_status})")
+                    return None
 
-            # Return the Link header
-            return headers.get("Link")
+            # Other HTTP status
+            logger.warning(f"Unexpected HTTP status during validation: {http_status}")
+            return token  # Try to continue anyway
 
-        except (IOError, OSError, subprocess.SubprocessError) as e:
-            logger.warning(f"Could not get headers: {e}")
-            print(
-                f"Warning: Could not get headers: {e}"
-            )  # Also print for user visibility
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout during token validation")
             return None
-        finally:
-            # Clean up the headers file
-            try:
-                os.remove(headers_file)
-            except FileNotFoundError:
-                pass
+        except Exception as e:
+            logger.error(f"Error during token validation: {e}")
+            return None
 
-    def get_all_tags(self) -> Optional[Dict[str, Any]]:
-        """Get all tags for the repository with pagination using curl."""
+    def get_all_tags(
+        self, context_url: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get all tags with optimized single-request-per-page approach.
+        """
         token = self.token_manager.get_token()
         if not token:
-            logger.error("Could not obtain a token. Aborting.")
+            logger.error("Could not obtain authentication token")
             return None
 
         base_url = f"https://ghcr.io/v2/{self.repository}/tags/list"
-        initial_url = f"{base_url}?n=200"
+        next_url = f"{base_url}?n=200"
         all_tags: List[str] = []
-        next_url = initial_url
+        page_count = 0
+        max_pages = 1000
 
-        while next_url:
-            full_url = (
-                next_url
-                if next_url.startswith("http")
-                else f"https://ghcr.io{next_url}"
-            )
+        # Log the specific context if provided, otherwise the repository
+        target_name = context_url if context_url else self.repository
+        logger.info(f"Starting pagination for: {target_name}")
 
-            # Validate token and get a valid one
-            valid_token = self._validate_token_and_retry(token, full_url)
-            if not valid_token:
-                return None
+        while next_url and page_count < max_pages:
+            page_count += 1
 
-            # Update token if it was refreshed
-            token = valid_token
+            # Construct full URL
+            if next_url.startswith("http"):
+                full_url = next_url
+            elif next_url.startswith("/"):
+                full_url = f"https://ghcr.io{next_url}"
+            else:
+                full_url = f"https://ghcr.io/{next_url}"
 
-            # Fetch the page
-            page_data = self._fetch_page(full_url, token)
+            logger.debug(f"Page {page_count}: {full_url}")
+
+            # NEW: Fetch page data AND next URL in single request
+            page_data, next_url = self._fetch_page_with_headers(full_url, token)
+
             if not page_data:
+                logger.error(f"Failed to fetch page {page_count}")
+                if all_tags:
+                    logger.warning(f"Returning {len(all_tags)} tags collected so far")
+                    return {"tags": all_tags}
                 return None
 
-            # Extract tags from the page
-            if "tags" in page_data:
-                all_tags.extend(page_data["tags"])
+            # Accumulate tags
+            page_tags = page_data.get("tags", [])
+            if page_tags:
+                all_tags.extend(page_tags)
+                logger.debug(
+                    f"Page {page_count}: {len(page_tags)} tags (total: {len(all_tags)})"
+                )
 
-            # Get the Link header for pagination
-            link_header = self._get_link_header(full_url, token)
-            next_url = (
-                self.token_manager.parse_link_header(link_header)
-                if link_header
-                else None
-            )
+        if page_count >= max_pages:
+            logger.warning(f"Hit maximum page limit ({max_pages})")
+
+        logger.info(
+            f"Pagination complete: {len(all_tags)} tags across {page_count} pages"
+        )
 
         return {"tags": all_tags}
 
@@ -1484,7 +1378,8 @@ class OCIClient:
         self, url: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Get filtered and sorted tags for the repository."""
-        tags_data = self.get_all_tags()
+        # Fix: Pass the url to get_all_tags so the logs reflect the actual endpoint
+        tags_data = self.get_all_tags(context_url=url)
         if not tags_data:
             return None
 
@@ -1501,6 +1396,87 @@ class OCIClient:
         )
 
         return {"tags": filtered_tags}
+
+    def _fetch_page_with_headers(
+        self, url: str, token: str
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """
+        Fetch page data AND Link header in a single request.
+
+        Returns:
+            Tuple of (page_data, next_url)
+        """
+        try:
+            cmd = [
+                "curl",
+                "-s",  # Silent
+                "-i",  # Include headers in output
+                "--http2",  # Force HTTP/2 if available
+                "-H",
+                f"Authorization: Bearer {token}",
+                url,
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
+
+            # Fix: Use regex to split headers/body to handle both \r\n and \n safely.
+            # curl -i output is separated by a blank line.
+            # This pattern matches \r\n\r\n OR \n\n
+            parts = re.split(r"\r?\n\r?\n", result.stdout, maxsplit=1)
+
+            if len(parts) != 2:
+                # Fallback: Sometimes curl output is messy or 100-continue interferes.
+                # If regex failed to find a clean split, try naive string replacement
+                # to normalize line endings and try again.
+                normalized = result.stdout.replace("\r\n", "\n")
+                parts = normalized.split("\n\n", 1)
+
+            if len(parts) != 2:
+                logger.error("Could not split headers and body (invalid separator)")
+                return None, None
+
+            headers_text, body = parts
+
+            # Parse headers (case-insensitive)
+            headers: Dict[str, str] = {}
+            # Use splitlines() to handle various line endings gracefully
+            for line in headers_text.splitlines():
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    headers[key.strip().lower()] = value.strip()
+
+            # Get Link header
+            link_header = headers.get("link")
+            next_url = (
+                self.token_manager.parse_link_header(link_header)
+                if link_header
+                else None
+            )
+
+            # Parse JSON body
+            data = json.loads(body)
+
+            logger.debug(
+                f"Fetched {len(data.get('tags', []))} tags, has_next: {next_url is not None}"
+            )
+
+            return data, next_url
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout fetching page: {url}")
+            return None, None
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in response: {e}")
+            return None, None
+        except Exception as e:
+            logger.error(f"Error fetching page: {e}")
+            return None, None
 
     def _parse_link_header(self, link_header: Optional[str]) -> Optional[str]:
         """
