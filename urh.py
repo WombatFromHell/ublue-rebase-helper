@@ -2094,8 +2094,8 @@ class CommandRegistry:
 
         if not args:
             try:
-                # Show only unpinned deployments in ascending order
-                unpinned_deployments = [d for d in deployments if not d.is_pinned][::-1]
+                # Check if there are any unpinned deployments first
+                unpinned_deployments = [d for d in deployments if not d.is_pinned]
 
                 if not unpinned_deployments:
                     print(
@@ -2103,13 +2103,19 @@ class CommandRegistry:
                     )  # Keep this user-facing message
                     return
 
+                # Show ALL deployments in ascending order (newest first)
+                # This allows users to see which deployments are already pinned
+                all_deployments = deployments[
+                    ::-1
+                ]  # Reverse order to show newest first
+
                 items = [
                     ListItem(
                         "",
-                        f"{d.repository} ({d.version})",
+                        f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
                         d.deployment_index,
                     )
-                    for d in unpinned_deployments
+                    for d in all_deployments
                 ]
 
                 # Get current deployment info for persistent header
@@ -2124,6 +2130,14 @@ class CommandRegistry:
                 )
 
                 if selected is None:
+                    return
+
+                # Validate that the selected deployment is not already pinned
+                selected_deployment = next(
+                    (d for d in all_deployments if d.deployment_index == selected), None
+                )
+                if selected_deployment and selected_deployment.is_pinned:
+                    print(f"Deployment {selected} is already pinned.")
                     return
 
                 deployment_num = selected
@@ -2165,7 +2179,7 @@ class CommandRegistry:
                 items = [
                     ListItem(
                         "",
-                        f"{d.repository} ({d.version})",
+                        f"{d.repository} ({d.version}) ({d.deployment_index}*)",
                         d.deployment_index,
                     )
                     for d in pinned_deployments
@@ -2217,7 +2231,7 @@ class CommandRegistry:
                 items = [
                     ListItem(
                         "",
-                        f"{d.repository} ({d.version}){'*' if d.is_pinned else ''}",
+                        f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
                         d.deployment_index,
                     )
                     for d in deployments

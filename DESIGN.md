@@ -28,16 +28,11 @@ This utility is designed to:
 
 #### `rebase <url>`
 
-- **Wraps**: `sudo rpm-ostree rebase <url>`
+- **Wraps**: `sudo rpm-ostree rebase <url>` with automatic ostree-image-signed:docker:// prefix
 - **Function**: Rebase the system to a specified container image URL
 - **Requires sudo**: Yes
-- **Interactive submenu**: When no `<url>` is specified, provides a submenu of common container URLs with arrow key navigation for selection:
-  - `ghcr.io/wombatfromhell/bazzite-nix:testing` (default option - first in list)
-  - `ghcr.io/wombatfromhell/bazzite-nix:stable`
-  - `ghcr.io/ublue-os/bazzite:stable`
-  - `ghcr.io/ublue-os/bazzite:testing`
-  - `ghcr.io/ublue-os/bazzite:unstable`
-  - `ghcr.io/astrovm/amyos:latest`
+- **Interactive submenu**: When no `<url>` is specified, provides a submenu of container URLs from the configuration with arrow key navigation for selection
+- **URL prefixing**: Automatically ensures the URL has the ostree-image-signed:docker:// prefix if not already present using `ensure_ostree_prefix()` function
 - **Usage**: Users can navigate with arrow keys or select directly by number; press ESC to cancel
 
 #### `remote-ls <url>`
@@ -86,21 +81,21 @@ This utility is designed to:
 - **Wraps**: `sudo ostree admin pin <num>`
 - **Function**: Pin a specific deployment by number to prevent automatic cleanup
 - **Requires sudo**: Yes
-- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information (excluding already pinned deployments) that allows users to select which deployment to pin. The selection maps to the appropriate deployment index.
+- **Interactive submenu**: When no `<num>` is specified, first checks if there are any unpinned deployments available to pin. If none are available, shows "No deployments available to pin". Otherwise, provides a submenu showing ALL deployments with their version information and deployment index numbers in format `(index)` for unpinned deployments and `(index*)` for pinned deployments, allowing users to see which deployments are already pinned. Only unpinned deployments can be selected for pinning. The selection maps to the appropriate deployment index.
 
 #### `unpin <num>`
 
 - **Wraps**: `sudo ostree admin pin -u <num>`
 - **Function**: Unpin a specific deployment by number
 - **Requires sudo**: Yes
-- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information (only showing already pinned deployments) that allows users to select which deployment to unpin. The selection maps to the appropriate deployment index.
+- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing deployments with their version information and deployment index numbers in format `(index*)` for pinned deployments that allows users to select which deployment to unpin. The selection maps to the appropriate deployment index.
 
 #### `rm <num>`
 
 - **Wraps**: `sudo rpm-ostree cleanup -r <num>`
 - **Function**: Remove a specific deployment by number
 - **Requires sudo**: Yes
-- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information that allows users to select which deployment to remove. The selection maps to the appropriate deployment index.
+- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information and deployment index numbers in format `(index)` for unpinned deployments and `(index*)` for pinned deployments that allows users to select which deployment to remove. The selection maps to the appropriate deployment index.
 
 #### `upgrade`
 
@@ -165,8 +160,11 @@ The configuration system is implemented using dataclasses with validation:
 - `RepositoryConfig`: Configuration for a specific repository with validation via `__post_init__` and `__slots__` and `kw_only=True`
 - `ContainerURLsConfig`: Configuration for container URLs with `__slots__` and `kw_only=True`
 - `SettingsConfig`: Global settings configuration with validation via `__post_init__` and `__slots__` and `kw_only=True`
-- `ConfigManager`: Manages configuration loading and saving with pattern matching serialization and internal `_config_path` caching
+- `ConfigManager`: Manages configuration loading and saving with pattern matching serialization using `_serialize_value()` method and internal `_config_path` caching with memoization
 - **Dataclass Improvements**: Uses `__slots__` for memory efficiency and validation methods and `kw_only=True` for better API design
+- **Type-safe Parsing**: Implements type-safe parsing with explicit type annotations and validation for configuration values
+- **Pattern Matching Serialization**: Uses pattern matching (`match` statement) in `_serialize_value()` for TOML serialization with proper escaping of backslashes
+- **Caching**: Implements internal `_config_path` caching in ConfigManager with memoization pattern
 
 ### Repository Filter Rules Configuration
 
@@ -177,7 +175,7 @@ Repository-specific filter rules are defined in the `[[repository]]` section of 
 - `filter_patterns`: List of regex patterns for tags to be filtered out
 - `ignore_tags`: List of exact tag names to be filtered out
 - `transform_patterns`: List of pattern/replacement pairs for tag transformations (e.g., for astrovm/amyos latest.YYYYMMDD -> YYYYMMDD)
-- `latest_dot_handling`: Optional handling for latest. tags
+- `latest_dot_handling`: Optional handling for latest. tags (e.g., "transform_dates_only")
 
 ### Container URL Configuration
 
@@ -197,17 +195,18 @@ Global settings are defined in the `[settings]` section:
 
 ### Command Registry
 
-Commands are defined using a centralized command registry (`CommandRegistry`) which maps command names to their definitions (including description, sudo requirement, and handler function). This approach reduces duplication and makes it easier to add new commands.
+Commands are defined using a centralized command registry (`CommandRegistry`) which maps command names to their definitions (including description, sudo requirement, handler function, and submenu capability). This approach reduces duplication and makes it easier to add new commands.
 
-The `CommandDefinition` dataclass with `__slots__` and `kw_only=True` defines command properties and behavior, enabling centralized command registration. Each command is registered with its name, description, handler function, sudo requirement, and whether it has a submenu.
+The `CommandDefinition` dataclass with `__slots__` and `kw_only=True` defines command properties and behavior, enabling centralized command registration. Each command is registered with its name, description, handler function, sudo requirement, conditional sudo function, and whether it has a submenu.
 
-- **Command Definition**: Uses `CommandDefinition` dataclass with `__slots__` and `kw_only=True` to define command properties (name, description, handler, requires_sudo, has_submenu)
-- **Centralized Registration**: All commands are registered in `CommandRegistry._register_commands()` method
+- **Command Definition**: Uses `CommandDefinition` dataclass with `__slots__` and `kw_only=True` to define command properties (name, description, handler, requires_sudo, conditional_sudo_func, has_submenu)
+- **Centralized Registration**: All commands are registered in `CommandRegistry._register_commands()` method with 9 total commands: check, kargs, ls, pin, rebase, remote-ls, rm, rollback, unpin, and upgrade
 - **Handler Functions**: Each command has a dedicated handler function (e.g., `_handle_rebase`, `_handle_pin`) that implements the command-specific logic
-- **Sudo Integration**: Automatically prepends `sudo` to commands that require elevated privileges
-- **Submenu Integration**: Commands with submenus (like rebase, pin, unpin, rm) provide interactive menu options when no arguments are provided
+- **Sudo Integration**: Automatically prepends `sudo` to commands that require elevated privileges using `run_command_with_conditional_sudo` function
+- **Conditional Sudo**: Supports conditional sudo requirements through `conditional_sudo_func` that determines sudo needs based on arguments
+- **Submenu Integration**: Commands with submenus (rebase, remote-ls, pin, unpin, rm) provide interactive menu options when no arguments are provided
 - **Argument Parsing**: Supports both direct command execution with arguments and interactive menu selection
-- **Generic Argument Parsing**: Uses `ArgumentParser` generic class for argument validation and prompting
+- **Generic Argument Parsing**: Uses `ArgumentParser` generic class (with `Generic[T]` and `TypeVar`) for argument validation and prompting
 - **Exit Code Handling**: Properly handles exit codes from underlying system commands using `sys.exit()`
 - **Error Handling**: Includes validation for numeric arguments to prevent command injection and provides user-friendly error messages
 
@@ -240,11 +239,15 @@ The codebase follows strict typing requirements to improve maintainability and r
 
 ## Test Suite Performance Optimization
 
-To ensure efficient test execution, the test suite implements several performance optimization strategies:
+To ensure efficient test execution, the test suite implements several performance optimization strategies across unit, integration, and end-to-end tests:
 
+- **Test Organization**: Organized into unit tests (`test_units.py`), integration tests (`test_integrations.py`), and end-to-end tests (`test_e2e.py`)
 - **Strategic Parametrization**: Uses `@pytest.mark.parametrize` to group similar tests and reduce duplicate setup/teardown overhead
 - **Session-Scoped Fixtures**: Uses `@pytest.fixture(scope="session")` for expensive operations that can be reused across tests (e.g., `reusable_config`, `precomputed_sample_data`, `sample_parsed_deployments`)
 - **Precomputed Test Data**: Precomputes sample data and parsed structures to avoid repeated computation during test execution
+- **Mocking Strategies**: Uses pytest-mock fixtures (`mocker`, `MockerFixture`, and `monkeypatch`) instead of unittest module for test mocking
+- **Test Isolation**: Implements proper test isolation to prevent side effects between tests
+- **Performance Testing**: Optimized single-request approach for pagination that fetches both data and headers in one call
 
 These optimization strategies significantly reduce test execution time by minimizing redundant operations and maximizing resource reuse across test runs.
 
@@ -335,6 +338,21 @@ The conditional sudo mechanism provides fine-grained control over when commands 
 - Input validation is performed on numeric arguments to prevent command injection
 - Timeout handling with proper exit codes (124 for timeouts)
 
+### Utility Functions and Error Handling
+
+- **run_command_safe**: Uses `LiteralString` annotation for security-critical command construction to prevent injection attacks
+- **Timeout Protection**: Implements configurable timeout protection (300 seconds default) for command execution
+- **Structured Logging**: Uses structured logging with appropriate log levels instead of print statements for better debuggability
+- **Error Reporting**: Provides user-friendly error messages for various failure scenarios
+- **Type Safety**: Maintains strict typing throughout utility functions using Optional[T] and other type hints
+- **Curl Requirement**: Checks for curl presence at startup using `check_curl_presence()` function
+- **Command Validation**: Validates command arguments and provides appropriate error handling
+- **File Operations**: Handles file operations with proper error handling and fallbacks
+- **Subprocess Execution**: Uses secure subprocess execution with proper error handling and return codes
+- **Command Return Codes**: Maintains proper return codes from underlying commands using `sys.exit()`
+- **Timeout Handling**: Implements timeout handling with standard exit codes (124 for timeouts)
+- **Resource Management**: Properly manages system resources with context managers and cleanup
+
 ### Deployment Information Parsing
 
 The utility parses deployment information from `rpm-ostree status -v` output using regex patterns to extract:
@@ -373,6 +391,11 @@ The MenuSystem supports multiple interface modes:
 - **Exception Handling Improvements**: Enhanced with walrus operator and next() for cleaner lookup in `_show_gum_menu`
 - **URH_AVOID_GUM Environment Variable**: Supports environment variable to force non-gum behavior to avoid hanging during tests
 - **Menu Selection Timeout**: 5-minute timeout protection for gum menu selection
+- **Sequence Usage**: Uses `Sequence[MenuItem]` instead of `List[MenuItem]` for better flexibility in function parameters to accept any sequence type
+- **URH_TEST_NO_EXCEPTION Environment Variable**: Supports environment variable in test environments to handle ESC behavior differently (return None instead of raising exception)
+- **Line Clearing**: Implements line clearing in non-test environments when ESC is pressed to maintain clean console output
+- **Keyboard Interrupt Handling**: Properly handles KeyboardInterrupt in text mode
+- **Menu System Loop**: Implements main menu loop with ESC handling to return to main menu after submenu ESC
 
 ### Modern Python 3.11+ Features
 
