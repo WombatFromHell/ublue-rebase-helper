@@ -405,6 +405,17 @@ class TestCommandIntegration:
         mock_print.assert_any_call("  tag2")
         mock_sys_exit.assert_called_once_with(0)
 
+    def test_command_registry_with_kargs_no_args(self, mocker):
+        """Test CommandRegistry integration with kargs command (no args)."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs([])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "kargs"])
+        mock_sys_exit.assert_called_once_with(0)
+
     def test_command_registry_with_kargs_command(self, mocker):
         """Test CommandRegistry integration with kargs command."""
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
@@ -416,6 +427,28 @@ class TestCommandIntegration:
         mock_run_command.assert_called_once_with(
             ["sudo", "rpm-ostree", "kargs", "--append=console=ttyS0", "--delete=quiet"]
         )
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_command_registry_with_kargs_help_flag(self, mocker):
+        """Test CommandRegistry integration with kargs --help."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs(["--help"])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "kargs", "--help"])
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_command_registry_with_kargs_h_flag(self, mocker):
+        """Test CommandRegistry integration with kargs -h."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs(["-h"])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "kargs", "-h"])
         mock_sys_exit.assert_called_once_with(0)
 
 

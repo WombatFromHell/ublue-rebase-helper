@@ -1584,6 +1584,17 @@ class TestCommandRegistry:
         registry = CommandRegistry()
         assert len(registry.get_commands()) == 10  # Number of commands in the registry
 
+    def test_handle_kargs_no_args(self, mocker):
+        """Test handling the kargs command with no arguments (should not use sudo)."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs([])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "kargs"])
+        mock_sys_exit.assert_called_once_with(0)
+
     def test_handle_kargs_with_args(self, mocker):
         """Test handling the kargs command with arguments."""
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
@@ -1596,6 +1607,49 @@ class TestCommandRegistry:
             ["sudo", "rpm-ostree", "kargs", "--append=console=ttyS0", "--delete=quiet"]
         )
         mock_sys_exit.assert_called_once_with(0)
+
+    def test_handle_kargs_with_help_flag(self, mocker):
+        """Test handling the kargs command with --help (should not use sudo)."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs(["--help"])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "kargs", "--help"])
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_handle_kargs_with_h_flag(self, mocker):
+        """Test handling the kargs command with -h (should not use sudo)."""
+        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mock_sys_exit = mocker.patch("sys.exit")
+
+        registry = CommandRegistry()
+        registry._handle_kargs(["-h"])
+
+        mock_run_command.assert_called_once_with(["rpm-ostree", "kargs", "-h"])
+        mock_sys_exit.assert_called_once_with(0)
+
+    def test_command_definition_conditional_sudo(self, mocker):
+        """Test that CommandDefinition can handle conditional sudo functions."""
+        registry = CommandRegistry()
+
+        # Get the kargs command definition
+        kargs_cmd = registry.get_command("kargs")
+
+        assert kargs_cmd is not None
+        assert kargs_cmd.name == "kargs"
+        assert kargs_cmd.requires_sudo == False  # Default value for compatibility
+        assert (
+            kargs_cmd.conditional_sudo_func is not None
+        )  # The actual conditional logic
+
+        # Verify the function works correctly
+        assert kargs_cmd.conditional_sudo_func([]) == False  # No args case
+        assert kargs_cmd.conditional_sudo_func(["--help"]) == False  # Help flag case
+        assert (
+            kargs_cmd.conditional_sudo_func(["--append=console=ttyS0"]) == True
+        )  # With modification args case
 
 
 class TestMainFunction:

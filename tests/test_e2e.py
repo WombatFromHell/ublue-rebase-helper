@@ -161,7 +161,11 @@ class TestCommandWorkflows:
         "command,expected_cmd,requires_sudo",
         [
             ("check", ["rpm-ostree", "upgrade", "--check"], False),
-            ("kargs", ["sudo", "rpm-ostree", "kargs"], True),
+            (
+                "kargs",
+                ["rpm-ostree", "kargs"],
+                False,
+            ),  # No args case doesn't require sudo
             ("upgrade", ["sudo", "rpm-ostree", "upgrade"], True),
             ("rollback", ["sudo", "rpm-ostree", "rollback"], True),
         ],

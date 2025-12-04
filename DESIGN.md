@@ -55,9 +55,17 @@ This utility is designed to:
 
 #### `kargs`
 
-- **Wraps**: `sudo rpm-ostree kargs ...`
-- **Function**: Manage kernel arguments (kargs) by passing all arguments to the underlying rpm-ostree kargs command
-- **Requires sudo**: Yes
+- **Wraps**: `rpm-ostree kargs ...` (without args, or with read-only args like --help) or `sudo rpm-ostree kargs ...` (with modification args)
+- **Function**: Manage kernel arguments (kargs) by passing all arguments to the underlying rpm-ostree kargs command; when no arguments are provided, or when read-only arguments like --help are provided, shows current kargs without requiring sudo; when modification arguments are provided, uses sudo for operations that modify system state
+- **Requires sudo**: Conditionally - No when no arguments provided or read-only arguments like --help are provided, Yes when modification arguments are provided
+- **Conditional Sudo Implementation**: Uses the general conditional sudo mechanism with `conditional_sudo_func` to determine sudo requirements based on arguments
+
+#### General Conditional Sudo Mechanism
+
+- **Purpose**: Provides a framework for commands that need to conditionally require sudo based on their arguments
+- **Implementation**: Uses `conditional_sudo_func` field in `CommandDefinition` to specify a function that determines if sudo is needed based on the provided arguments
+- **Fallback**: Commands can still use the simple `requires_sudo` boolean for static requirements
+- **Usage**: The `run_command_with_conditional_sudo` function handles the execution logic based on either static or dynamic sudo requirements
 
 #### `ls`
 

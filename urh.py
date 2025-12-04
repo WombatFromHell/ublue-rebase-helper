@@ -1407,6 +1407,10 @@ class OCIClient:
         Returns:
             Tuple of (page_data, next_url)
         """
+        # Initialize variables to help with type checking
+        stdout: str = ""
+        body: str = ""
+
         try:
             cmd = [
                 "curl",
@@ -1426,31 +1430,71 @@ class OCIClient:
                 timeout=30,
             )
 
-            # Fix: Use regex to split headers/body to handle both \r\n and \n safely.
-            # curl -i output is separated by a blank line.
-            # This pattern matches \r\n\r\n OR \n\n
-            parts = re.split(r"\r?\n\r?\n", result.stdout, maxsplit=1)
+            # Properly parse the HTTP response which has format:
+            # HTTP/1.1 XXX Status
+            # Headers...
+            #
+            # Body
+            stdout = result.stdout
 
-            if len(parts) != 2:
-                # Fallback: Sometimes curl output is messy or 100-continue interferes.
-                # If regex failed to find a clean split, try naive string replacement
-                # to normalize line endings and try again.
-                normalized = result.stdout.replace("\r\n", "\n")
-                parts = normalized.split("\n\n", 1)
+            # Split the response into HTTP status line, headers, and body
+            # First, find the index of the double newline that separates headers from body
+            double_crlf_pos = stdout.find("\r\n\r\n")
+            double_lf_pos = stdout.find("\n\n")
 
-            if len(parts) != 2:
-                logger.error("Could not split headers and body (invalid separator)")
+            # Check which separator appears first and use it
+            if double_crlf_pos != -1 and (
+                double_lf_pos == -1 or double_crlf_pos < double_lf_pos
+            ):
+                # Use \r\n\r\n separator (4 characters)
+                double_newline_pos = double_crlf_pos
+                separator_len = 4
+            elif double_lf_pos != -1:
+                # Use \n\n separator (2 characters)
+                double_newline_pos = double_lf_pos
+                separator_len = 2
+            else:
+                logger.error("Could not find header/body separator in response")
+                logger.debug(f"Response content: {repr(stdout)}")
                 return None, None
 
-            headers_text, body = parts
+            # Extract headers part (from after status line to separator)
+            headers_and_status = stdout[:double_newline_pos]
+            body = stdout[double_newline_pos + separator_len :]  # Skip the separator
+
+            # The first line is the HTTP status line, subsequent lines are headers
+            lines = headers_and_status.splitlines()
+            if not lines:
+                logger.error("Empty response headers")
+                return None, None
+
+            # First line is status line, rest are headers
+            status_line = lines[0]
+            header_lines = lines[1:]
 
             # Parse headers (case-insensitive)
             headers: Dict[str, str] = {}
-            # Use splitlines() to handle various line endings gracefully
-            for line in headers_text.splitlines():
+            for line in header_lines:
                 if ":" in line:
                     key, value = line.split(":", 1)
                     headers[key.strip().lower()] = value.strip()
+
+            # Log status line for debugging
+            logger.debug(f"HTTP Status: {status_line}")
+
+            # Check if status indicates an auth error, and if so, try with fresh token
+            if "401" in status_line or "403" in status_line:
+                logger.warning(
+                    f"Received {status_line}, invalidating token and retrying..."
+                )
+                self.token_manager.invalidate_cache()
+                new_token = self.token_manager.get_token()
+                if new_token:
+                    logger.info("Got new token, retrying request...")
+                    return self._fetch_page_with_headers(url, new_token)
+                else:
+                    logger.error("Could not obtain new token after auth error")
+                    return None, None
 
             # Get Link header
             link_header = headers.get("link")
@@ -1461,6 +1505,21 @@ class OCIClient:
             )
 
             # Parse JSON body
+            if not body.strip():
+                logger.error(f"Empty response body. Full response: {repr(stdout)}")
+                return None, None
+
+            logger.warning(f"Response body: {repr(body)}")
+
+            # Check if the response is an error response from GHCR
+            # GHCR error responses follow the pattern: {"errors":[...]}
+            stripped_body = body.strip()
+            if stripped_body.startswith('{"errors":'):
+                logger.error(f"GHCR API returned an error: {stripped_body}")
+                # This is an error response, not the expected tags response
+                # The error suggests authentication/token issue
+                return None, None
+
             data = json.loads(body)
 
             logger.debug(
@@ -1474,6 +1533,8 @@ class OCIClient:
             return None, None
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in response: {e}")
+            logger.error(f"Response body that failed to parse: {repr(body)}")
+            logger.error(f"Full response that failed to parse: {repr(stdout)}")
             return None, None
         except Exception as e:
             logger.error(f"Error fetching page: {e}")
@@ -1699,6 +1760,10 @@ _menu_system = MenuSystem()
 # ============================================================================
 
 
+# Type for functions that determine if sudo is required based on arguments
+SudoConditionFunc: TypeAlias = Callable[[List[str]], bool]
+
+
 @dataclass(slots=True, kw_only=True)
 class CommandDefinition:
     """Definition of a command."""
@@ -1707,6 +1772,9 @@ class CommandDefinition:
     description: str
     handler: Callable[[List[str]], None]
     requires_sudo: bool = False
+    conditional_sudo_func: Optional[SudoConditionFunc] = (
+        None  # Function to determine sudo conditionally when needed
+    )
     has_submenu: bool = False
 
 
@@ -1714,6 +1782,31 @@ from typing import Generic, TypeVar
 from typing import Optional as OptionalType
 
 T = TypeVar("T")
+
+
+def run_command_with_conditional_sudo(
+    base_cmd: List[str],
+    args: List[str],
+    requires_sudo: bool,
+    conditional_sudo_func: Optional[SudoConditionFunc] = None,
+) -> None:
+    """Execute a command with conditional sudo based on the requires_sudo setting."""
+    # Determine if sudo is needed
+    if conditional_sudo_func is not None:
+        # Use the conditional function to determine if sudo is needed
+        needs_sudo = conditional_sudo_func(args)
+    else:
+        # Use the static boolean value
+        needs_sudo = requires_sudo
+
+    # Build the command
+    if needs_sudo:
+        cmd = ["sudo", *base_cmd]
+    else:
+        cmd = base_cmd[:]
+
+    cmd.extend(args)
+    sys.exit(run_command(cmd))
 
 
 class ArgumentParser(Generic[T]):
@@ -1767,7 +1860,8 @@ class CommandRegistry:
                 name="kargs",
                 description="Manage kernel arguments (kargs)",
                 handler=self._handle_kargs,
-                requires_sudo=True,
+                requires_sudo=False,  # Default value for compatibility with tests
+                conditional_sudo_func=self._should_use_sudo_for_kargs,  # Use function for conditional sudo
             ),
             "ls": CommandDefinition(
                 name="ls",
@@ -1848,11 +1942,31 @@ class CommandRegistry:
         else:
             sys.exit(1)
 
+    def _should_use_sudo_for_kargs(self, args: List[str]) -> bool:
+        """Determine if sudo should be used for kargs command based on arguments."""
+        if not args:
+            return False  # No args case is read-only
+
+        # Check for help flags that are read-only operations
+        help_flags = {"--help", "-h", "--help-all"}
+        if any(arg in help_flags for arg in args):
+            return False
+
+        # Check for other potentially read-only operations (like just listing current)
+        # If args contain only flags for inspection (not modification), return False
+        # For kargs, typically modification operations involve --append, --delete, etc.
+        # while inspection operations like --help don't need sudo
+        return True  # Default to using sudo for any other argument combinations
+
     def _handle_kargs(self, args: List[str]) -> None:
         """Handle the kargs command."""
-        cmd = ["sudo", "rpm-ostree", "kargs"]
-        cmd.extend(args)
-        sys.exit(run_command(cmd))
+        # Use the general conditional sudo mechanism
+        run_command_with_conditional_sudo(
+            ["rpm-ostree", "kargs"],
+            args,
+            requires_sudo=False,  # This value is ignored when conditional_sudo_func is provided
+            conditional_sudo_func=self._should_use_sudo_for_kargs,
+        )
 
     def _handle_rebase(self, args: List[str]) -> None:
         """Handle the rebase command."""
