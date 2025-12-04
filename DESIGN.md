@@ -102,6 +102,12 @@ This utility is designed to:
 - **Requires sudo**: Yes
 - **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information that allows users to select which deployment to remove. The selection maps to the appropriate deployment index.
 
+#### `upgrade`
+
+- **Wraps**: `sudo rpm-ostree upgrade`
+- **Function**: Upgrade to the latest version
+- **Requires sudo**: Yes
+
 ### Menu System
 
 When no command is provided, the utility uses gum to display an interactive menu with available commands. If gum is not available, it falls back to displaying a list of available commands.
@@ -164,13 +170,13 @@ The configuration system is implemented using dataclasses with validation:
 
 ### Repository Filter Rules Configuration
 
-Repository-specific filter rules are defined in the `[[repository]]` section of the TOML file as an array of tables. Each repository can have:
+Repository-specific filter rules are defined in the `[[repository]]` section of the TOML file as an array of tables. Each repository is defined with:
 
-- `name`: The repository name (required field)
+- `name`: The repository name (required field, e.g., "ublue-os/bazzite", "wombatfromhell/bazzite-nix", "astrovm/amyos")
 - `include_sha256_tags`: Whether to include SHA256 hash tags (default: false)
 - `filter_patterns`: List of regex patterns for tags to be filtered out
 - `ignore_tags`: List of exact tag names to be filtered out
-- `transform_patterns`: List of pattern/replacement pairs for tag transformations (e.g., for astrovm/amyos)
+- `transform_patterns`: List of pattern/replacement pairs for tag transformations (e.g., for astrovm/amyos latest.YYYYMMDD -> YYYYMMDD)
 - `latest_dot_handling`: Optional handling for latest. tags
 
 ### Container URL Configuration
@@ -225,6 +231,12 @@ The codebase follows strict typing requirements to improve maintainability and r
 - Avoid union return types like `Union[str, None]` where possible in favor of proper `Optional[T]` annotations
 - Separate business logic from UI presentation by having distinct functions for data processing and display
 - Use modern Python 3.11+ type features like `Self`, `TypeGuard`, `Never`, and `LiteralString` where appropriate
+- **Generic Type Support**: Uses `Generic[T]` and `TypeVar` for type-safe argument parsing and validation with the `ArgumentParser` class
+- **Type Aliases**: Defines type aliases for complex types like `SudoConditionFunc`, `DateVersionKey`, `AlphaVersionKey`, and `VersionSortKey` to improve readability and maintainability
+- **LiteralString for Security**: Uses `LiteralString` annotation for security-critical command construction to prevent injection attacks through `run_command_safe()` function
+- **Type Guards**: Implements `TypeGuard` functions like `is_valid_deployment_info()` for safe type narrowing in conditional checks
+- **Sequence Usage**: Uses `Sequence[MenuItem]` instead of `List[MenuItem]` for better flexibility in function parameters to accept any sequence type
+- **Optional Type Handling**: Properly handles `OptionalType[T]` for functions that may or may not return values
 
 ## Test Suite Performance Optimization
 
@@ -305,7 +317,18 @@ The implementation defines several custom exception classes:
 
 Commands that modify the system state require elevated privileges using `sudo`. The utility automatically prepends `sudo` to these commands.
 
-### Error Handling
+### Conditional Sudo Implementation Details
+
+The conditional sudo mechanism provides fine-grained control over when commands require elevated privileges:
+
+- **SudoConditionFunc Type**: Uses `SudoConditionFunc` type alias (Callable[[List[str]], bool]) for functions that determine sudo requirements based on arguments
+- **CommandDefinition Integration**: The `CommandDefinition` dataclass includes a `conditional_sudo_func` field that accepts functions to determine sudo requirements dynamically
+- **run_command_with_conditional_sudo**: This function handles the execution logic and determines whether sudo is needed based on either static `requires_sudo` boolean or dynamic `conditional_sudo_func`
+- **kargs Command Example**: The `kargs` command uses conditional sudo - requires sudo for modification operations but not for read-only operations like `--help`
+- **Implementation Pattern**: Commands like `kargs` implement `_should_use_sudo_for_*` methods that analyze the arguments to determine if the operation is read-only or requires system modifications
+- **Fallback Behavior**: When `conditional_sudo_func` is None, falls back to the static `requires_sudo` boolean
+
+### Command Execution Framework
 
 - Invalid deployment numbers are caught and reported with user-friendly error messages
 - Missing arguments result in usage information being displayed

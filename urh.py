@@ -828,9 +828,9 @@ class OCITokenManager:
         try:
             with open(cache_filepath, "w") as f:
                 f.write(token)
-            logger.info(f"Successfully cached new token to {cache_filepath}")
+            logger.debug(f"Successfully cached new token to {cache_filepath}")
         except (IOError, OSError) as e:
-            logger.warning(f"Could not write token to cache {cache_filepath}: {e}")
+            logger.debug(f"Could not write token to cache {cache_filepath}: {e}")
 
     def get_token(self) -> Optional[str]:
         """
@@ -881,7 +881,7 @@ class OCITokenManager:
         cache_filepath = self._get_cache_filepath()
         try:
             os.remove(cache_filepath)
-            logger.info(f"Invalidated and removed cache file: {cache_filepath}")
+            logger.debug(f"Invalidated and removed cache file: {cache_filepath}")
         except FileNotFoundError:
             # Cache file doesn't exist, nothing to do.
             logger.debug(f"Cache file does not exist: {cache_filepath}")
@@ -1272,7 +1272,7 @@ class OCIClient:
 
             # Token expired or invalid
             if http_status == 403 or http_status == 401:
-                logger.warning(
+                logger.debug(
                     f"Token invalid (HTTP {http_status}). Fetching new token..."
                 )
                 self.token_manager.invalidate_cache()
@@ -1297,14 +1297,14 @@ class OCIClient:
 
                 http_status = int(result.stdout.strip())
                 if http_status == 200:
-                    logger.info("New token validated successfully")
+                    logger.debug("New token validated successfully")
                     return new_token
                 else:
                     logger.error(f"New token also invalid (HTTP {http_status})")
                     return None
 
             # Other HTTP status
-            logger.warning(f"Unexpected HTTP status during validation: {http_status}")
+            logger.debug(f"Unexpected HTTP status during validation: {http_status}")
             return token  # Try to continue anyway
 
         except subprocess.TimeoutExpired:
@@ -1333,7 +1333,7 @@ class OCIClient:
 
         # Log the specific context if provided, otherwise the repository
         target_name = context_url if context_url else self.repository
-        logger.info(f"Starting pagination for: {target_name}")
+        logger.debug(f"Starting pagination for: {target_name}")
 
         while next_url and page_count < max_pages:
             page_count += 1
@@ -1369,7 +1369,7 @@ class OCIClient:
         if page_count >= max_pages:
             logger.warning(f"Hit maximum page limit ({max_pages})")
 
-        logger.info(
+        logger.debug(
             f"Pagination complete: {len(all_tags)} tags across {page_count} pages"
         )
 
@@ -1484,13 +1484,13 @@ class OCIClient:
 
             # Check if status indicates an auth error, and if so, try with fresh token
             if "401" in status_line or "403" in status_line:
-                logger.warning(
+                logger.debug(
                     f"Received {status_line}, invalidating token and retrying..."
                 )
                 self.token_manager.invalidate_cache()
                 new_token = self.token_manager.get_token()
                 if new_token:
-                    logger.info("Got new token, retrying request...")
+                    logger.debug("Got new token, retrying request...")
                     return self._fetch_page_with_headers(url, new_token)
                 else:
                     logger.error("Could not obtain new token after auth error")
@@ -1506,10 +1506,10 @@ class OCIClient:
 
             # Parse JSON body
             if not body.strip():
-                logger.error(f"Empty response body. Full response: {repr(stdout)}")
+                logger.debug(f"Empty response body. Full response: {repr(stdout)}")
                 return None, None
 
-            logger.warning(f"Response body: {repr(body)}")
+            logger.debug(f"Response body: {repr(body)}")
 
             # Check if the response is an error response from GHCR
             # GHCR error responses follow the pattern: {"errors":[...]}
@@ -1529,12 +1529,12 @@ class OCIClient:
             return data, next_url
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Timeout fetching page: {url}")
+            logger.debug(f"Timeout fetching page: {url}")
             return None, None
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in response: {e}")
-            logger.error(f"Response body that failed to parse: {repr(body)}")
-            logger.error(f"Full response that failed to parse: {repr(stdout)}")
+            logger.debug(f"Invalid JSON in response: {e}")
+            logger.debug(f"Response body that failed to parse: {repr(body)}")
+            logger.debug(f"Full response that failed to parse: {repr(stdout)}")
             return None, None
         except Exception as e:
             logger.error(f"Error fetching page: {e}")
