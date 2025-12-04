@@ -12,6 +12,7 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
 from urh import (  # noqa: E402
+    CommandRegistry,
     CommandType,
     ContainerURLsConfig,
     DeploymentInfo,
@@ -704,7 +705,7 @@ def common_command_test_setup(mocker, mock_menu_system_with_common_setup):
         "get_config": mock_get_config,
         "run_command": mock_run_command,
         "sys_exit": mock_sys_exit,
-        "menu_system": mock_menu_system_with_common_setup
+        "menu_system": mock_menu_system_with_common_setup,
     }
 
 

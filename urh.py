@@ -1529,10 +1529,10 @@ class OCIClient:
             return data, next_url
 
         except subprocess.TimeoutExpired:
-            logger.debug(f"Timeout fetching page: {url}")
+            logger.error(f"Timeout fetching page: {url}")
             return None, None
         except json.JSONDecodeError as e:
-            logger.debug(f"Invalid JSON in response: {e}")
+            logger.error(f"Invalid JSON in response: {e}")
             logger.debug(f"Response body that failed to parse: {repr(body)}")
             logger.debug(f"Full response that failed to parse: {repr(stdout)}")
             return None, None

@@ -325,10 +325,14 @@ class TestCommandIntegration:
         mock_sys_exit = mocker.patch("sys.exit")
 
         # CRITICAL: Mock the expensive system calls that were causing slow performance
-        mock_get_current_deployment_info = mocker.patch("urh.get_current_deployment_info",
-                                                        return_value={"repository": "test", "version": "v1.0"})
-        mock_format_deployment_header = mocker.patch("urh.format_deployment_header",
-                                                     return_value="Current deployment: test (v1.0)")
+        mock_get_current_deployment_info = mocker.patch(
+            "urh.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
+        )
+        mock_format_deployment_header = mocker.patch(
+            "urh.format_deployment_header",
+            return_value="Current deployment: test (v1.0)",
+        )
 
         config = mocker.MagicMock()
         config.container_urls.options = [
@@ -553,11 +557,14 @@ class TestUtilityIntegration:
         assert repository == "wombatfromhell/bazzite-nix"
         assert context == "testing"
 
-    @pytest.mark.parametrize("cmd,returncode,expected", [
-        (["echo", "hello"], 0, 0),
-        (["false"], 1, 1),  # This command always fails
-        (["nonexistent_command"], 1, 1),
-    ])
+    @pytest.mark.parametrize(
+        "cmd,returncode,expected",
+        [
+            (["echo", "hello"], 0, 0),
+            (["false"], 1, 1),  # This command always fails
+            (["nonexistent_command"], 1, 1),
+        ],
+    )
     def test_run_command_integration(self, mocker, cmd, returncode, expected):
         """Test run_command integration with subprocess using parametrization."""
         mock_subprocess = mocker.patch("subprocess.run")

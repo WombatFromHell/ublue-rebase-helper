@@ -242,12 +242,11 @@ The codebase follows strict typing requirements to improve maintainability and r
 
 To ensure efficient test execution, the test suite implements several performance optimization strategies:
 
-- **Parallel Execution**: Uses `pytest-xdist` with `--numprocesses=auto` to run tests across multiple CPU cores, significantly reducing total execution time
 - **Strategic Parametrization**: Uses `@pytest.mark.parametrize` to group similar tests and reduce duplicate setup/teardown overhead
 - **Session-Scoped Fixtures**: Uses `@pytest.fixture(scope="session")` for expensive operations that can be reused across tests (e.g., `reusable_config`, `precomputed_sample_data`, `sample_parsed_deployments`)
 - **Precomputed Test Data**: Precomputes sample data and parsed structures to avoid repeated computation during test execution
 
-The test suite performance was improved from approximately 6.8 seconds to 2.0 seconds through these optimizations (about 3.4x faster).
+These optimization strategies significantly reduce test execution time by minimizing redundant operations and maximizing resource reuse across test runs.
 
 The implementation uses several type aliases for better type safety:
 
@@ -492,6 +491,14 @@ When test functions are similarly named yet test different code concerns, each t
 ## Test Suite Architecture
 
 The project follows a comprehensive testing strategy with three distinct test categories, enhanced with advanced pytest features for maintainability and reduced code duplication.
+
+### Current Test Dependencies
+
+The test suite uses the following dependencies:
+
+- `pytest`: Core testing framework
+- `pytest-mock`: For mocking capabilities in tests
+- `slipcover`: For code coverage analysis
 
 ### Current Test Infrastructure
 
