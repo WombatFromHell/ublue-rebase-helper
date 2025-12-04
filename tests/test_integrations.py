@@ -348,7 +348,12 @@ class TestCommandIntegration:
 
         mock_menu_system.show_menu.assert_called_once()
         mock_run_command.assert_called_once_with(
-            ["sudo", "rpm-ostree", "rebase", "ghcr.io/test/repo:stable"]
+            [
+                "sudo",
+                "rpm-ostree",
+                "rebase",
+                "ostree-image-signed:docker://ghcr.io/test/repo:stable",
+            ]
         )
         mock_sys_exit.assert_called_once_with(0)
 

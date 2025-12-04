@@ -1911,7 +1911,12 @@ class TestMainFunction:
         registry._handle_rebase(["ghcr.io/test/repo:testing"])
 
         mock_run_command.assert_called_once_with(
-            ["sudo", "rpm-ostree", "rebase", "ghcr.io/test/repo:testing"]
+            [
+                "sudo",
+                "rpm-ostree",
+                "rebase",
+                "ostree-image-signed:docker://ghcr.io/test/repo:testing",
+            ]
         )
         mock_sys_exit.assert_called_once_with(0)
 
@@ -1949,7 +1954,12 @@ class TestMainFunction:
 
         mock_menu_system.show_menu.assert_called_once()
         mock_run_command.assert_called_once_with(
-            ["sudo", "rpm-ostree", "rebase", "ghcr.io/test/repo:testing"]
+            [
+                "sudo",
+                "rpm-ostree",
+                "rebase",
+                "ostree-image-signed:docker://ghcr.io/test/repo:testing",
+            ]
         )
         mock_sys_exit.assert_called_once_with(0)
 

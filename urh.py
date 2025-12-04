@@ -644,6 +644,20 @@ def extract_context_from_url(url: str) -> Optional[str]:
     return None
 
 
+def ensure_ostree_prefix(url: str) -> str:
+    """Ensure the URL has the ostree-image-signed:docker:// prefix if not already present."""
+    if url.startswith("ostree-image-signed:docker://") or url.startswith(
+        "ostree-image-unsigned:docker://"
+    ):
+        return url
+    elif url.startswith("docker://"):
+        # If it already has docker:// prefix, just add the ostree-image-signed part
+        return f"ostree-image-signed:{url}"
+    else:
+        # Add the complete prefix
+        return f"ostree-image-signed:docker://{url}"
+
+
 # ============================================================================
 # DEPLOYMENT MANAGEMENT
 # ============================================================================
@@ -2000,7 +2014,9 @@ class CommandRegistry:
         else:
             url = args[0]
 
-        cmd = ["sudo", "rpm-ostree", "rebase", url]
+        # Ensure the URL has the proper ostree prefix for rpm-ostree
+        prefixed_url = ensure_ostree_prefix(url)
+        cmd = ["sudo", "rpm-ostree", "rebase", prefixed_url]
         sys.exit(run_command(cmd))
 
     def _handle_remote_ls(self, args: List[str]) -> None:
