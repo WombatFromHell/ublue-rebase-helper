@@ -324,6 +324,12 @@ class TestCommandIntegration:
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
+        # CRITICAL: Mock the expensive system calls that were causing slow performance
+        mock_get_current_deployment_info = mocker.patch("urh.get_current_deployment_info",
+                                                        return_value={"repository": "test", "version": "v1.0"})
+        mock_format_deployment_header = mocker.patch("urh.format_deployment_header",
+                                                     return_value="Current deployment: test (v1.0)")
+
         config = mocker.MagicMock()
         config.container_urls.options = [
             "ghcr.io/test/repo:testing",
@@ -547,13 +553,17 @@ class TestUtilityIntegration:
         assert repository == "wombatfromhell/bazzite-nix"
         assert context == "testing"
 
-    def test_run_command_integration(self, mocker):
-        """Test run_command integration with subprocess."""
+    @pytest.mark.parametrize("cmd,returncode,expected", [
+        (["echo", "hello"], 0, 0),
+        (["false"], 1, 1),  # This command always fails
+        (["nonexistent_command"], 1, 1),
+    ])
+    def test_run_command_integration(self, mocker, cmd, returncode, expected):
+        """Test run_command integration with subprocess using parametrization."""
         mock_subprocess = mocker.patch("subprocess.run")
-        mock_subprocess.return_value.returncode = 0
+        mock_subprocess.return_value.returncode = returncode
 
-        cmd = ["echo", "hello"]
         result = run_command(cmd)
 
-        assert result == 0
+        assert result == expected
         mock_subprocess.assert_called_once_with(cmd, check=False)

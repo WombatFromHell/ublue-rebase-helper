@@ -21,6 +21,7 @@ from urh import (  # noqa: E402
     SettingsConfig,
     TagContext,
     URHConfig,
+    parse_deployment_info,
 )
 
 # ============================================================================
@@ -576,10 +577,27 @@ def mock_command_registry(mocker):
     return mocker.patch("urh.CommandRegistry", return_value=mock_registry)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def mock_run_command(mocker):
-    """Mock run_command function."""
+    """Session-scoped mock run_command function."""
     return mocker.patch("urh.run_command")
+
+
+@pytest.fixture
+def shared_mocks(mocker):
+    """Function-scoped shared mocks for commonly used functions."""
+    mocks = {
+        "run_command": mocker.patch("urh.run_command"),
+        "get_status_output": mocker.patch("urh.get_status_output"),
+        "parse_deployment_info": mocker.patch("urh.parse_deployment_info"),
+        "get_deployment_info": mocker.patch("urh.get_deployment_info"),
+        "get_current_deployment_info": mocker.patch("urh.get_current_deployment_info"),
+        "format_deployment_header": mocker.patch("urh.format_deployment_header"),
+        "extract_repository_from_url": mocker.patch("urh.extract_repository_from_url"),
+        "extract_context_from_url": mocker.patch("urh.extract_context_from_url"),
+        "check_curl_presence": mocker.patch("urh.check_curl_presence"),
+    }
+    return mocks
 
 
 # ============================================================================
@@ -612,6 +630,90 @@ def temp_cache_file():
         os.unlink(cache_path)
     except FileNotFoundError:
         pass
+
+
+@pytest.fixture(scope="session")
+def reusable_config():
+    """Session-scoped reusable URHConfig for performance."""
+    return URHConfig.get_default()
+
+
+@pytest.fixture(scope="session")
+def precomputed_sample_data():
+    """Session-scoped precomputed sample data for tests."""
+    return {
+        "status_output": SAMPLE_STATUS_OUTPUT,
+        "status_output_with_pinned": SAMPLE_STATUS_OUTPUT_WITH_PINNED,
+        "tags_data": SAMPLE_TAGS_DATA,
+        "config_data": SAMPLE_CONFIG_DATA,
+    }
+
+
+@pytest.fixture(scope="session")
+def sample_parsed_deployments():
+    """Session-scoped pre-parsed deployment info to avoid repeated parsing."""
+    return parse_deployment_info(SAMPLE_STATUS_OUTPUT)
+
+
+@pytest.fixture
+def fresh_command_registry():
+    """Function-scoped fresh CommandRegistry to ensure test isolation."""
+    return CommandRegistry()
+
+
+@pytest.fixture
+def mock_command_registry_instance(mocker):
+    """Function-scoped mocked CommandRegistry instance."""
+    mock_registry = mocker.MagicMock()
+    mock_command = mocker.MagicMock()
+    mock_registry.get_command.return_value = mock_command
+    return mock_registry
+
+
+@pytest.fixture(scope="module")
+def command_registry_instance():
+    """Module-scoped CommandRegistry instance for performance."""
+    return CommandRegistry()
+
+
+@pytest.fixture
+def mock_menu_system_with_common_setup(mocker):
+    """Pre-configured menu system mock for tests requiring menu interactions."""
+    mock_menu_system = mocker.MagicMock()
+    mock_menu_system.show_menu.return_value = "ghcr.io/test/repo:stable"
+    return mock_menu_system
+
+
+@pytest.fixture
+def common_command_test_setup(mocker, mock_menu_system_with_common_setup):
+    """Common setup for command-related tests to reduce duplication."""
+    # Mock common functions that are frequently mocked in command tests
+    mock_get_config = mocker.patch("urh.get_config")
+    mock_run_command = mocker.patch("urh.run_command", return_value=0)
+    mock_sys_exit = mocker.patch("sys.exit")
+
+    # Setup common config
+    config = mocker.MagicMock()
+    config.container_urls.options = [
+        "ghcr.io/test/repo:testing",
+        "ghcr.io/test/repo:stable",
+    ]
+    mock_get_config.return_value = config
+
+    return {
+        "get_config": mock_get_config,
+        "run_command": mock_run_command,
+        "sys_exit": mock_sys_exit,
+        "menu_system": mock_menu_system_with_common_setup
+    }
+
+
+@pytest.fixture
+def mock_get_config_returning(reusable_config, mocker):
+    """Fixture that mocks get_config to return a reusable config instance."""
+    mock_func = mocker.patch("urh.get_config")
+    mock_func.return_value = reusable_config
+    return mock_func
 
 
 # ============================================================================

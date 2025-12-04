@@ -5,3 +5,13 @@ description = "Implementation of bazzite-rebase-helper for compatibility with cu
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["pytest>=8.4.2", "pytest-mock>=3.15.1", "slipcover>=1.0.17"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+markers = [
+  "unit: mark test as a unit test",
+  "integration: mark test as an integration test",
+  "e2e: mark test as an end-to-end test",
+  "slow: mark test as slow running",
+]

@@ -306,6 +306,19 @@ class TestCommandWorkflows:
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
+        # CRITICAL: Mock the expensive system calls that were causing slow performance
+        # These are called even when arguments are provided due to early validation
+        mock_get_deployment_info = mocker.patch("urh.get_deployment_info",
+                                                return_value=[
+                                                    DeploymentInfo(
+                                                        deployment_index=1,
+                                                        is_current=True,
+                                                        repository="test/repo",
+                                                        version="1.0.0",
+                                                        is_pinned=False,
+                                                    )
+                                                ])
+
         registry = CommandRegistry()
         handler = getattr(registry, f"_handle_{command}")
         handler(["1"])
@@ -472,6 +485,12 @@ class TestErrorHandlingWorkflows:
         """Test workflow when ESC is pressed in menu."""
         mock_get_config = mocker.patch("urh.get_config")
         mock_menu_system = mocker.patch("urh._menu_system")
+
+        # CRITICAL: Mock the expensive system calls that were causing slow performance
+        mock_get_current_deployment_info = mocker.patch("urh.get_current_deployment_info",
+                                                        return_value={"repository": "test", "version": "v1.0"})
+        mock_format_deployment_header = mocker.patch("urh.format_deployment_header",
+                                                     return_value="Current deployment: test (v1.0)")
 
         config = mocker.MagicMock()
         config.container_urls.options = [

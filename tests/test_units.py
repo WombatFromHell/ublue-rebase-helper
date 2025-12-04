@@ -1695,6 +1695,12 @@ class TestMainFunction:
             mocker.patch("urh._menu_system", mock_menu_system)
             mocker.patch("urh.check_curl_presence", return_value=True)
 
+            # CRITICAL: Mock expensive deployment functions called during main menu display
+            mocker.patch("urh.get_current_deployment_info",
+                        return_value={"repository": "test", "version": "v1.0"})
+            mocker.patch("urh.format_deployment_header",
+                        return_value="Current deployment: test (v1.0)")
+
             main()
 
             mock_menu_system.show_menu.assert_called_once()
@@ -1742,6 +1748,12 @@ class TestMainFunction:
         mocker.patch("urh.CommandRegistry", return_value=mock_command_registry)
         mocker.patch("urh._menu_system", mock_menu_system)
         mocker.patch("urh.check_curl_presence", return_value=True)
+
+        # CRITICAL: Mock expensive deployment functions called during main menu display
+        mocker.patch("urh.get_current_deployment_info",
+                    return_value={"repository": "test", "version": "v1.0"})
+        mocker.patch("urh.format_deployment_header",
+                    return_value="Current deployment: test (v1.0)")
 
         main()
 
@@ -2005,6 +2017,19 @@ class TestMainFunction:
         mock_run_command = mocker.patch("urh.run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
+        # CRITICAL: Mock the expensive system calls that were causing slow performance
+        # These are called even when arguments are provided due to early validation
+        mock_get_deployment_info = mocker.patch("urh.get_deployment_info",
+                                                return_value=[
+                                                    DeploymentInfo(
+                                                        deployment_index=0,
+                                                        is_current=True,
+                                                        repository="test/repo",
+                                                        version="1.0.0",
+                                                        is_pinned=False,
+                                                    )
+                                                ])
+
         registry = CommandRegistry()
         handler = getattr(registry, f"_handle_{command}")
         handler(["0"])
@@ -2124,6 +2149,12 @@ class TestMainFunction:
         mock_get_config = mocker.patch("urh.get_config")
         mock_menu_system = mocker.patch("urh._menu_system")
 
+        # CRITICAL: Mock the expensive system calls that were causing slow performance
+        mock_get_current_deployment_info = mocker.patch("urh.get_current_deployment_info",
+                                                        return_value={"repository": "test", "version": "v1.0"})
+        mock_format_deployment_header = mocker.patch("urh.format_deployment_header",
+                                                     return_value="Current deployment: test (v1.0)")
+
         config = mocker.MagicMock()
         config.container_urls.options = ["ghcr.io/test/repo:testing"]
         mock_get_config.return_value = config
@@ -2224,6 +2255,19 @@ class TestMainFunction:
         """Test deployment command handlers with invalid deployment number."""
         mock_print = mocker.patch("builtins.print")
         mock_sys_exit = mocker.patch("sys.exit")
+
+        # CRITICAL: Mock the expensive system calls that were causing slow performance
+        # The handlers call get_deployment_info() even for invalid number validation
+        mock_get_deployment_info = mocker.patch("urh.get_deployment_info",
+                                                return_value=[
+                                                    DeploymentInfo(
+                                                        deployment_index=1,
+                                                        is_current=True,
+                                                        repository="test/repo",
+                                                        version="1.0.0",
+                                                        is_pinned=False,
+                                                    )
+                                                ])
 
         registry = CommandRegistry()
         handler = getattr(registry, f"_handle_{command}")
