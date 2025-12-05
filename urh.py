@@ -28,6 +28,7 @@ from typing import (
     Callable,
     Dict,
     Final,
+    Generic,
     List,
     LiteralString,
     NamedTuple,
@@ -37,10 +38,12 @@ from typing import (
     Tuple,
     TypeAlias,
     TypeGuard,
+    TypeVar,
     Union,
     cast,
     override,
 )
+from typing import Optional as OptionalType
 
 # Set up logging
 logger: Final = logging.getLogger(__name__)
@@ -1603,6 +1606,7 @@ class GumCommand:
     persistent_header: Optional[str] = None
     cursor: str = "→"
     selected_prefix: str = "✓ "
+    height: int = 10  # Default height, can be increased for more options
     timeout: int = 300  # 5 minute timeout
 
     def build(self) -> List[str]:
@@ -1614,6 +1618,8 @@ class GumCommand:
             self.cursor,
             "--selected-prefix",
             self.selected_prefix,
+            "--height",
+            str(self.height),
             "--header",
             self._build_header(),
         ]
@@ -1680,8 +1686,13 @@ class MenuSystem:
         """Show menu using gum with builder pattern."""
         options = [item.display_text for item in items]
 
+        # Set height to show all options in the menu
+        # Use the exact number of options to display them all without scrolling
         gum_cmd = GumCommand(
-            options=options, header=header, persistent_header=persistent_header
+            options=options,
+            header=header,
+            persistent_header=persistent_header,
+            height=len(options),  # Show all options
         )
 
         try:
@@ -1791,9 +1802,6 @@ class CommandDefinition:
     )
     has_submenu: bool = False
 
-
-from typing import Generic, TypeVar
-from typing import Optional as OptionalType
 
 T = TypeVar("T")
 
@@ -1927,6 +1935,13 @@ class CommandRegistry:
                 name="rm",
                 description="Remove a deployment",
                 handler=self._handle_rm,
+                requires_sudo=True,
+                has_submenu=True,
+            ),
+            "undeploy": CommandDefinition(
+                name="undeploy",
+                description="Remove a deployment by index",
+                handler=self._handle_undeploy,
                 requires_sudo=True,
                 has_submenu=True,
             ),
@@ -2269,6 +2284,95 @@ class CommandRegistry:
             cmd = ["sudo", "rpm-ostree", "cleanup", "-r", str(deployment_num)]
             sys.exit(run_command(cmd))
 
+    def _handle_undeploy(self, args: List[str]) -> None:
+        """Handle the undeploy command."""
+        deployments = get_deployment_info()
+        if not deployments:
+            print("No deployments found.")  # Keep as print for test compatibility
+            return
+
+        deployment_num = None  # Initialize variable
+
+        if not args:
+            try:
+                # Show ALL deployments (same as 'pin' command shows all)
+                all_deployments = deployments[
+                    ::-1
+                ]  # Reverse order to show newest first
+
+                items = [
+                    ListItem(
+                        "",
+                        f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
+                        d.deployment_index,
+                    )
+                    for d in all_deployments
+                ]
+
+                # Get current deployment info for persistent header
+                deployment_info_header = get_current_deployment_info()
+                persistent_header = format_deployment_header(deployment_info_header)
+
+                while True:  # Loop to return to selection if user cancels
+                    selected = _menu_system.show_menu(
+                        items,
+                        "Select deployment to undeploy (ESC to cancel):",
+                        persistent_header=persistent_header,
+                        is_main_menu=False,
+                    )
+
+                    if selected is None:
+                        return
+
+                    deployment_num = selected
+
+                    # Get deployment info for confirmation message
+                    selected_deployment = next(
+                        (d for d in all_deployments if d.deployment_index == selected),
+                        None,
+                    )
+
+                    if selected_deployment:
+                        # Show confirmation prompt
+                        confirmation_items = [
+                            MenuItem("Y", "Yes, undeploy this deployment"),
+                            MenuItem("N", "No, cancel undeployment"),
+                        ]
+
+                        confirmation_header = f"Confirm undeployment of:\n  {selected_deployment.repository} ({selected_deployment.version}) ({selected_deployment.deployment_index}{'*' if selected_deployment.is_pinned else ''})"
+                        confirmation = _menu_system.show_menu(
+                            confirmation_items,
+                            confirmation_header,
+                            persistent_header=persistent_header,
+                            is_main_menu=False,
+                        )
+
+                        if confirmation and confirmation.lower() == "y":
+                            # User confirmed, proceed with undeploy
+                            break
+                        else:
+                            # User cancelled, continue to show selection again
+                            continue
+                    else:
+                        # This shouldn't happen in normal flow, but just in case
+                        break
+            except MenuExitException as _:
+                # ESC pressed in submenu, return to main menu
+                return
+        else:
+            try:
+                deployment_num = int(args[0])
+            except ValueError:
+                print(
+                    f"Invalid deployment number: {args[0]}"
+                )  # Keep as print for test compatibility
+                sys.exit(1)
+                return  # Exit after error to avoid executing the command
+
+        if deployment_num is not None:
+            cmd = ["sudo", "ostree", "admin", "undeploy", str(deployment_num)]
+            sys.exit(run_command(cmd))
+
 
 # ============================================================================
 # MAIN ENTRY POINT
@@ -2284,7 +2388,9 @@ def _main_menu_loop() -> None:
     persistent_header = format_deployment_header(deployment_info_header)
 
     commands = registry.get_commands()
-    items = [MenuItem(cmd.name, cmd.description) for cmd in commands]
+    # Sort commands alphabetically by name for better organization
+    sorted_commands = sorted(commands, key=lambda cmd: cmd.name)
+    items = [MenuItem(cmd.name, cmd.description) for cmd in sorted_commands]
 
     selected = _menu_system.show_menu(
         items,

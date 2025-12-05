@@ -1582,7 +1582,9 @@ class TestCommandRegistry:
     def test_init(self):
         """Test CommandRegistry initialization."""
         registry = CommandRegistry()
-        assert len(registry.get_commands()) == 10  # Number of commands in the registry
+        assert (
+            len(registry.get_commands()) == 11
+        )  # Number of commands in the registry (updated to include undeploy)
 
     def test_handle_kargs_no_args(self, mocker):
         """Test handling the kargs command with no arguments (should not use sudo)."""
@@ -1797,7 +1799,7 @@ class TestMainFunction:
         registry = CommandRegistry()
         commands = registry.get_commands()
 
-        assert len(commands) == 10
+        assert len(commands) == 11  # Updated to include undeploy command
         command_names = [cmd.name for cmd in commands]
         assert "check" in command_names
         assert "ls" in command_names
@@ -2026,6 +2028,11 @@ class TestMainFunction:
                 ["rpm-ostree", "cleanup", "-r", "0"],
                 ["sudo", "rpm-ostree", "cleanup", "-r", "0"],
             ),
+            (
+                "undeploy",
+                ["ostree", "admin", "undeploy", "0"],
+                ["sudo", "ostree", "admin", "undeploy", "0"],
+            ),
         ],
     )
     def test_deployment_command_handlers_with_args(
@@ -2062,6 +2069,7 @@ class TestMainFunction:
         [
             ("pin", False, "0"),  # Pin an unpinned deployment
             ("unpin", True, "0"),  # Unpin a pinned deployment
+            ("undeploy", False, "0"),  # Undeploy any deployment
         ],
     )
     def test_deployment_command_handlers_with_menu(
@@ -2099,6 +2107,8 @@ class TestMainFunction:
             expected_cmd = ["sudo", "ostree", "admin", "pin", "-u", menu_selection]
         elif command == "rm":
             expected_cmd = ["sudo", "rpm-ostree", "cleanup", "-r", menu_selection]
+        elif command == "undeploy":
+            expected_cmd = ["sudo", "ostree", "admin", "undeploy", menu_selection]
         else:
             # This should never happen with the current parametrize but makes pyright happy
             expected_cmd = []
@@ -2249,6 +2259,31 @@ class TestMainFunction:
 
         mock_menu_system.show_menu.assert_called_once()
 
+    def test_handle_undeploy_menu_exit_exception(self, mocker):
+        """Test undeploy command handler when submenu raises MenuExitException."""
+        mock_get_deployment_info = mocker.patch("urh.get_deployment_info")
+        mock_menu_system = mocker.patch("urh._menu_system")
+
+        # Set up mock deployments (all will be shown in undeploy menu, like pin command)
+        mock_deployment_info = [
+            DeploymentInfo(
+                deployment_index=0,
+                is_current=True,
+                repository="test/repo",
+                version="1.0.0",
+                is_pinned=False,
+            ),
+        ]
+        mock_get_deployment_info.return_value = mock_deployment_info
+
+        # Simulate MenuExitException from submenu
+        mock_menu_system.show_menu.side_effect = MenuExitException(is_main_menu=False)
+
+        registry = CommandRegistry()
+        registry._handle_undeploy([])  # No args, should show menu
+
+        mock_menu_system.show_menu.assert_called_once()
+
     def test_handle_rm_menu_exit_exception(self, mocker):
         """Test rm command handler when submenu raises MenuExitException."""
         mock_get_deployment_info = mocker.patch("urh.get_deployment_info")
@@ -2274,7 +2309,7 @@ class TestMainFunction:
 
         mock_menu_system.show_menu.assert_called_once()
 
-    @pytest.mark.parametrize("command", ["pin", "unpin", "rm"])
+    @pytest.mark.parametrize("command", ["pin", "unpin", "rm", "undeploy"])
     def test_deployment_command_invalid_number(self, mocker, command):
         """Test deployment command handlers with invalid deployment number."""
         mock_print = mocker.patch("builtins.print")

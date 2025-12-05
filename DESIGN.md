@@ -97,6 +97,13 @@ This utility is designed to:
 - **Requires sudo**: Yes
 - **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information and deployment index numbers in format `(index)` for unpinned deployments and `(index*)` for pinned deployments that allows users to select which deployment to remove. The selection maps to the appropriate deployment index.
 
+#### `undeploy <num>`
+
+- **Wraps**: `sudo ostree admin undeploy <num>`
+- **Function**: Remove a specific deployment by number
+- **Requires sudo**: Yes
+- **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information and deployment index numbers in format `(index)` for unpinned deployments and `(index*)` for pinned deployments that allows users to select which deployment to undeploy. The selection maps to the appropriate deployment index. After selection, shows a confirmation modal requiring user to confirm with 'Y' to proceed or 'N' to cancel.
+
 #### `upgrade`
 
 - **Wraps**: `sudo rpm-ostree upgrade`
@@ -105,9 +112,9 @@ This utility is designed to:
 
 ### Menu System
 
-When no command is provided, the utility uses gum to display an interactive menu with available commands. If gum is not available, it falls back to displaying a list of available commands.
+When no command is provided, the utility uses gum to display an interactive menu with available commands sorted alphabetically. If gum is not available, it falls back to displaying a list of available commands.
 
-The MenuSystem class handles both TTY and non-TTY contexts, with support for gum-based interactive menus and text-based fallback menus. It supports ESC key handling for navigation between menus.
+The MenuSystem class handles both TTY and non-TTY contexts, with support for gum-based interactive menus and text-based fallback menus. It supports ESC key handling for navigation between menus. The gum menu uses dynamic height settings to display all available options without requiring scrolling, ensuring all commands are visible in a single view.
 
 ### Menu Navigation Behavior
 
