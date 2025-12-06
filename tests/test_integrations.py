@@ -1,19 +1,17 @@
-import json
 import os
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from urh import (
-    CommandRegistry,
-    ConfigManager,
-    MenuSystem,
-    OCIClient,
+from src.urh.commands import CommandRegistry
+from src.urh.config import ConfigManager
+from src.urh.menu import MenuSystem
+from src.urh.oci_client import OCIClient
+from src.urh.deployment import format_deployment_header, parse_deployment_info
+from src.urh.system import (
     extract_context_from_url,
     extract_repository_from_url,
-    format_deployment_header,
-    parse_deployment_info,
     run_command,
 )
 
@@ -51,7 +49,8 @@ debug_mode = true
         try:
             with pytest.MonkeyPatch().context() as m:
                 m.setattr(
-                    "urh.ConfigManager.get_config_path", lambda self: Path(config_path)
+                    "src.urh.config.ConfigManager.get_config_path",
+                    lambda self: Path(config_path),
                 )
                 config_manager = ConfigManager()
                 config = config_manager.load_config()
@@ -86,7 +85,10 @@ debug_mode = true
             config_path = Path(temp_dir) / "urh.toml"
 
             with pytest.MonkeyPatch().context() as m:
-                m.setattr("urh.ConfigManager.get_config_path", lambda self: config_path)
+                m.setattr(
+                    "src.urh.config.ConfigManager.get_config_path",
+                    lambda self: config_path,
+                )
                 config_manager = ConfigManager()
                 config_manager.create_default_config()
 
@@ -122,11 +124,11 @@ class TestOCIIntegration:
 
         # Mock the internal methods that make curl calls for tag fetching
         # Use the new optimized single-request method
-        mock_fetch_page_with_headers = mocker.patch.object(
+        mocker.patch.object(
             OCIClient, "_fetch_page_with_headers", return_value=(mock_tags_data, None)
         )
         # Mock the token validation to return the same token
-        mock_validate_token = mocker.patch.object(
+        mocker.patch.object(
             OCIClient, "_validate_token_and_retry", return_value=mock_token
         )
 
@@ -319,18 +321,55 @@ class TestCommandIntegration:
 
     def test_command_registry_with_menu_system(self, mocker):
         """Test CommandRegistry integration with MenuSystem."""
-        mock_get_config = mocker.patch("urh.get_config")
-        mock_menu_system = mocker.patch("urh._menu_system")
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        # Set environment variable to force non-gum behavior (avoid hanging during tests)
+        import os
+
+        mocker.patch.dict(os.environ, {"URH_AVOID_GUM": "1"})
+        # Make sure os.isatty(1) returns True so the menu system thinks it's in a TTY
+        mocker.patch("os.isatty", return_value=True)
+
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
+        )
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        mock_get_config = mocker.patch("src.urh.config.get_config")
+        # The _handle_rebase function imports _menu_system from .menu (src.urh.menu) at module level
+        # Mock the menu system where it's imported
+        mock_menu_system = mocker.patch("src.urh.commands._menu_system")
+        # Mock _run_command function
+        mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
         # CRITICAL: Mock the expensive system calls that were causing slow performance
-        mock_get_current_deployment_info = mocker.patch(
-            "urh.get_current_deployment_info",
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test", "version": "v1.0"},
         )
-        mock_format_deployment_header = mocker.patch(
-            "urh.format_deployment_header",
+        mocker.patch(
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test (v1.0)",
         )
 
@@ -361,13 +400,54 @@ class TestCommandIntegration:
         self, mocker, sample_deployment_info
     ):
         """Test CommandRegistry integration with deployment info."""
-        mock_get_deployment_info = mocker.patch("urh.get_deployment_info")
-        mock_get_current_deployment_info = mocker.patch(
-            "urh.get_current_deployment_info"
+        # Set environment variable to force non-gum behavior (avoid hanging during tests)
+        import os
+
+        mocker.patch.dict(os.environ, {"URH_AVOID_GUM": "1"})
+        # Make sure os.isatty(1) returns True so the menu system thinks it's in a TTY
+        mocker.patch("os.isatty", return_value=True)
+
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
         )
-        mock_format_deployment_header = mocker.patch("urh.format_deployment_header")
-        mock_menu_system = mocker.patch("urh._menu_system")
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        mock_get_deployment_info = mocker.patch(
+            "src.urh.deployment.get_deployment_info"
+        )
+        mock_get_current_deployment_info = mocker.patch(
+            "src.urh.deployment.get_current_deployment_info"
+        )
+        mock_format_deployment_header = mocker.patch(
+            "src.urh.deployment.format_deployment_header"
+        )
+        # The _handle_pin function imports _menu_system from .menu (src.urh.menu) at module level
+        # Mock the menu system where it's imported
+        mock_menu_system = mocker.patch("src.urh.commands._menu_system")
+        # Mock _run_command function
+        mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
         current_deployment_info = {
@@ -396,10 +476,42 @@ class TestCommandIntegration:
 
     def test_command_registry_with_oci_client(self, mocker):
         """Test CommandRegistry integration with OCIClient."""
-        mock_extract_repository = mocker.patch(
-            "urh.extract_repository_from_url", return_value="test/repo"
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
         )
-        mock_client_class = mocker.patch("urh.OCIClient")
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        mock_extract_repository = mocker.patch(
+            "src.urh.system.extract_repository_from_url", return_value="test/repo"
+        )
+        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        # Patch both locations to ensure proper mocking
+        mocker.patch("src.urh.commands._run_command", return_value=0)
+        mocker.patch(
+            "src.urh.commands._run_command", return_value=0
+        )  # Main module location for direct calls
         mock_sys_exit = mocker.patch("sys.exit")
         mock_print = mocker.patch("builtins.print")
 
@@ -422,7 +534,35 @@ class TestCommandIntegration:
 
     def test_command_registry_with_kargs_no_args(self, mocker):
         """Test CommandRegistry integration with kargs command (no args)."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
+        )
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        # Mock _run_command function
+        mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
@@ -433,7 +573,35 @@ class TestCommandIntegration:
 
     def test_command_registry_with_kargs_command(self, mocker):
         """Test CommandRegistry integration with kargs command."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
+        )
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        # Mock _run_command function
+        mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
@@ -446,7 +614,35 @@ class TestCommandIntegration:
 
     def test_command_registry_with_kargs_help_flag(self, mocker):
         """Test CommandRegistry integration with kargs --help."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
+        )
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        # Mock _run_command function
+        mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
@@ -457,7 +653,35 @@ class TestCommandIntegration:
 
     def test_command_registry_with_kargs_h_flag(self, mocker):
         """Test CommandRegistry integration with kargs -h."""
-        mock_run_command = mocker.patch("urh.run_command", return_value=0)
+        # Mock all necessary functions to prevent privilege escalation
+        mock_subprocess_result = mocker.MagicMock()
+        mock_subprocess_result.returncode = 0  # For "which curl" command to return True
+
+        # Also patch subprocess.run to prevent any direct subprocess calls
+        mocker.patch("subprocess.run", return_value=mock_subprocess_result)
+        # Patch system functions that make subprocess calls to prevent privilege escalation
+        mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        )  # Assume curl is available in tests
+        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+        # Patch deployment info functions that make system calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test", "version": "v1.0"},
+        )
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=None
+        )  # Needed for get_deployment_info
+        # Patch config function to avoid file system access
+        mock_config = mocker.MagicMock()
+        mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
+        mocker.patch("src.urh.config.get_config", return_value=mock_config)
+        # Also patch setup_logging in the cli module
+        mocker.patch("src.urh.cli.setup_logging", return_value=None)
+
+        # Mock _run_command function
+        mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()

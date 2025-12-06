@@ -8,22 +8,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-parent_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(parent_dir))
+# Add the project root directory to the Python path to allow importing from src
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-from urh import (  # noqa: E402
-    CommandRegistry,
-    CommandType,
+from src.urh.commands import CommandRegistry, CommandType  # noqa: E402
+from src.urh.config import (  # noqa: E402
     ContainerURLsConfig,
-    DeploymentInfo,
-    ListItem,
-    MenuItem,
     RepositoryConfig,
     SettingsConfig,
-    TagContext,
     URHConfig,
-    parse_deployment_info,
 )
+from src.urh.deployment import DeploymentInfo, TagContext, parse_deployment_info  # noqa: E402
+from src.urh.models import ListItem, MenuItem  # noqa: E402
 
 # ============================================================================
 # COMMON TEST DATA
@@ -329,7 +327,7 @@ def mock_config_manager(mocker):
     mock_manager = MagicMock()
     mock_config = MagicMock()
     mock_manager.load_config.return_value = mock_config
-    return mocker.patch("urh._config_manager", mock_manager)
+    return mocker.patch("src.urh.config._config_manager", mock_manager)
 
 
 @pytest.fixture
@@ -454,19 +452,19 @@ def sample_deployment_info_with_pinned():
 @pytest.fixture
 def mock_get_deployment_info(mocker):
     """Mock get_deployment_info function."""
-    return mocker.patch("urh.get_deployment_info")
+    return mocker.patch("src.urh.deployment.get_deployment_info")
 
 
 @pytest.fixture
 def mock_get_current_deployment_info(mocker):
     """Mock get_current_deployment_info function."""
-    return mocker.patch("urh.get_current_deployment_info")
+    return mocker.patch("src.urh.deployment.get_current_deployment_info")
 
 
 @pytest.fixture
 def mock_get_status_output(mocker):
     """Mock get_status_output function."""
-    return mocker.patch("urh.get_status_output")
+    return mocker.patch("src.urh.deployment.get_status_output")
 
 
 # ============================================================================
@@ -498,13 +496,13 @@ def sample_list_items():
 def mock_menu_system(mocker):
     """Mock MenuSystem for testing."""
     mock_system = MagicMock()
-    return mocker.patch("urh._menu_system", mock_system)
+    return mocker.patch("src.urh.commands._menu_system", mock_system)
 
 
 @pytest.fixture
 def mock_menu_system_show_menu(mocker):
     """Mock MenuSystem.show_menu method."""
-    return mocker.patch("urh.MenuSystem.show_menu")
+    return mocker.patch("src.urh.menu.MenuSystem.show_menu")
 
 
 # ============================================================================
@@ -517,7 +515,9 @@ def mock_oci_token_manager(mocker):
     """Mock OCITokenManager for testing."""
     mock_manager = MagicMock()
     mock_manager.get_token.return_value = "test_token"
-    return mocker.patch("urh.OCITokenManager", return_value=mock_manager)
+    return mocker.patch(
+        "src.urh.token_manager.OCITokenManager", return_value=mock_manager
+    )
 
 
 @pytest.fixture
@@ -526,7 +526,7 @@ def mock_oci_client(mocker):
     mock_client = MagicMock()
     mock_client.get_all_tags.return_value = SAMPLE_TAGS_DATA
     mock_client.fetch_repository_tags.return_value = {"tags": ["tag1", "tag2"]}
-    return mocker.patch("urh.OCIClient", return_value=mock_client)
+    return mocker.patch("src.urh.oci_client.OCIClient", return_value=mock_client)
 
 
 @pytest.fixture
@@ -575,28 +575,38 @@ def mock_command_registry(mocker):
     mock_registry = MagicMock()
     mock_command = MagicMock()
     mock_registry.get_command.return_value = mock_command
-    return mocker.patch("urh.CommandRegistry", return_value=mock_registry)
+    return mocker.patch("src.urh.commands.CommandRegistry", return_value=mock_registry)
 
 
 @pytest.fixture(scope="session")
 def mock_run_command(mocker):
     """Session-scoped mock run_command function."""
-    return mocker.patch("urh.run_command")
+    return mocker.patch("src.urh.commands._run_command")
 
 
 @pytest.fixture
 def shared_mocks(mocker):
     """Function-scoped shared mocks for commonly used functions."""
     mocks = {
-        "run_command": mocker.patch("urh.run_command"),
-        "get_status_output": mocker.patch("urh.get_status_output"),
-        "parse_deployment_info": mocker.patch("urh.parse_deployment_info"),
-        "get_deployment_info": mocker.patch("urh.get_deployment_info"),
-        "get_current_deployment_info": mocker.patch("urh.get_current_deployment_info"),
-        "format_deployment_header": mocker.patch("urh.format_deployment_header"),
-        "extract_repository_from_url": mocker.patch("urh.extract_repository_from_url"),
-        "extract_context_from_url": mocker.patch("urh.extract_context_from_url"),
-        "check_curl_presence": mocker.patch("urh.check_curl_presence"),
+        "run_command": mocker.patch("src.urh.commands._run_command"),
+        "get_status_output": mocker.patch("src.urh.deployment.get_status_output"),
+        "parse_deployment_info": mocker.patch(
+            "src.urh.deployment.parse_deployment_info"
+        ),
+        "get_deployment_info": mocker.patch("src.urh.deployment.get_deployment_info"),
+        "get_current_deployment_info": mocker.patch(
+            "src.urh.deployment.get_current_deployment_info"
+        ),
+        "format_deployment_header": mocker.patch(
+            "src.urh.deployment.format_deployment_header"
+        ),
+        "extract_repository_from_url": mocker.patch(
+            "src.urh.system.extract_repository_from_url"
+        ),
+        "extract_context_from_url": mocker.patch(
+            "src.urh.system.extract_context_from_url"
+        ),
+        "check_curl_presence": mocker.patch("src.urh.system.check_curl_presence"),
     }
     return mocks
 
@@ -609,13 +619,13 @@ def shared_mocks(mocker):
 @pytest.fixture
 def mock_extract_repository_from_url(mocker):
     """Mock extract_repository_from_url function."""
-    return mocker.patch("urh.extract_repository_from_url")
+    return mocker.patch("src.urh.system.extract_repository_from_url")
 
 
 @pytest.fixture
 def mock_extract_context_from_url(mocker):
     """Mock extract_context_from_url function."""
-    return mocker.patch("urh.extract_context_from_url")
+    return mocker.patch("src.urh.system.extract_context_from_url")
 
 
 @pytest.fixture
@@ -690,7 +700,7 @@ def common_command_test_setup(mocker, mock_menu_system_with_common_setup):
     """Common setup for command-related tests to reduce duplication."""
     # Mock common functions that are frequently mocked in command tests
     mock_get_config = mocker.patch("urh.get_config")
-    mock_run_command = mocker.patch("urh.run_command", return_value=0)
+    mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
     mock_sys_exit = mocker.patch("sys.exit")
 
     # Setup common config
@@ -1053,7 +1063,7 @@ def mock_deployment_scenario(mocker, create_mock_deployment_info):
             "urh.format_deployment_header",
             return_value=f"Current deployment: {deployments[current_idx].repository} ({deployments[current_idx].version})",
         )
-        mock_run = mocker.patch("urh.run_command", return_value=0)
+        mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_exit = mocker.patch("sys.exit")
 
         return {
@@ -1075,16 +1085,19 @@ def command_execution_result(request, mocker):
     """Parametrized fixture for different command execution outcomes."""
     scenario = getattr(request, "param", "success")
     if scenario == "success":
-        return mocker.patch("urh.run_command", return_value=0)
+        return mocker.patch("src.urh.commands._run_command", return_value=0)
     elif scenario == "failure":
-        return mocker.patch("urh.run_command", return_value=1)
+        return mocker.patch("src.urh.commands._run_command", return_value=1)
     elif scenario == "not_found":
-        return mocker.patch("urh.run_command", side_effect=FileNotFoundError)
+        return mocker.patch(
+            "src.urh.commands._run_command", side_effect=FileNotFoundError
+        )
     elif scenario == "timeout":
         import subprocess
 
         return mocker.patch(
-            "urh.run_command", side_effect=subprocess.TimeoutExpired("cmd", 30)
+            "src.urh.commands._run_command",
+            side_effect=subprocess.TimeoutExpired("cmd", 30),
         )
 
 
@@ -1148,7 +1161,7 @@ def command_handler_scenario(request, mocker):
     """Parametrized fixture for command handler scenarios."""
     scenario = getattr(request, "param", "success")
 
-    mock_run_command = mocker.patch("urh.run_command")
+    mock_run_command = mocker.patch("src.urh.commands._run_command")
     mock_sys_exit = mocker.patch("sys.exit")
 
     if scenario == "success":
