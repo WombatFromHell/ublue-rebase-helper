@@ -20,7 +20,11 @@ from src.urh.config import (  # noqa: E402
     SettingsConfig,
     URHConfig,
 )
-from src.urh.deployment import DeploymentInfo, TagContext, parse_deployment_info  # noqa: E402
+from src.urh.deployment import (  # noqa: E402
+    DeploymentInfo,
+    TagContext,
+    parse_deployment_info,
+)
 from src.urh.models import ListItem, MenuItem  # noqa: E402
 
 # ============================================================================

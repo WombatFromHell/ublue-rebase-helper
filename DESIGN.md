@@ -246,9 +246,9 @@ The codebase follows strict typing requirements to improve maintainability and r
 
 ## Test Suite Performance Optimization
 
-To ensure efficient test execution, the test suite implements several performance optimization strategies across unit, integration, and end-to-end tests:
+To ensure efficient test execution, the test suite implements several performance optimization strategies across the module-specific test files:
 
-- **Test Organization**: Organized into unit tests (`test_units.py`), integration tests (`test_integrations.py`), and end-to-end tests (`test_e2e.py`)
+- **Test Organization**: Organized into module-specific test files that mirror the source code structure (e.g., `test_cli.py`, `test_commands.py`, `test_config.py`, etc.)
 - **Strategic Parametrization**: Uses `@pytest.mark.parametrize` to group similar tests and reduce duplicate setup/teardown overhead
 - **Session-Scoped Fixtures**: Uses `@pytest.fixture(scope="session")` for expensive operations that can be reused across tests (e.g., `reusable_config`, `precomputed_sample_data`, `sample_parsed_deployments`)
 - **Precomputed Test Data**: Precomputes sample data and parsed structures to avoid repeated computation during test execution
@@ -520,7 +520,26 @@ When test functions are similarly named yet test different code concerns, each t
 
 ## Test Suite Architecture
 
-The project follows a comprehensive testing strategy with three distinct test categories, enhanced with advanced pytest features for maintainability and reduced code duplication.
+The project follows a comprehensive testing strategy with tests organized by module, enhanced with advanced pytest features for maintainability and reduced code duplication.
+
+### Test File Organization
+
+The test suite is now organized to mirror the source code structure:
+
+- `tests/test_cli.py`: Tests for CLI module functionality
+- `tests/test_commands.py`: Tests for command registry and handler functionality
+- `tests/test_config.py`: Tests for configuration management plus integration tests
+- `tests/test_constants.py`: Tests for constants (if any)
+- `tests/test_core.py`: Tests for core module functionality
+- `tests/test_deployment.py`: Tests for deployment management plus integration tests
+- `tests/test_menu.py`: Tests for menu system plus integration tests
+- `tests/test_models.py`: Tests for data models
+- `tests/test_oci_client.py`: Tests for OCI client plus integration tests
+- `tests/test_system.py`: Tests for system utilities plus integration tests
+- `tests/test_tag_filter.py`: Tests for tag filtering functionality
+- `tests/test_token_manager.py`: Tests for token management functionality
+- `tests/test_validators.py`: Tests for validation utilities
+- `tests/test_utils.py`: Tests for general utilities
 
 ### Current Test Dependencies
 
@@ -544,15 +563,25 @@ The test suite leverages modern pytest features to minimize code duplication and
 
 Tests are organized using parametrization patterns that consolidate similar functionality:
 
-- **Command Handler Parametrization**: Single parametrized tests cover multiple command variants, with special handling for commands that require different logic (like `ls` command).
+- **Command Handler Parametrization**: Single parametrized tests cover multiple command variants, with special handling for commands that require different logic.
 - **Deployment Command Consolidation**: Pin, unpin, and rm command tests use shared parametrized fixtures to test deployment scenarios with consistent setup.
 - **Menu System Patterns**: Comprehensive parametrization covers different menu modes (gum, text, non-TTY) and error handling scenarios.
 - **OCI Client Testing**: Advanced parametrization enables testing of various OCI scenarios including pagination, token management, and context filtering.
 
 ### Current Test Coverage
 
-- **Test Count**: 182 comprehensive tests covering all functionality
+- **Test Count**: Comprehensive tests covering all functionality
 - **Code Quality**: All tests pass linting checks (ruff, pyright) with no duplicate method names
 - **Maintainability**: Reusable fixtures and consistent parametrization patterns
 - **Readability**: Well-organized test structure with clear naming conventions
 - **Comprehensive Coverage**: All functionality thoroughly tested with enhanced error scenario coverage
+- **Module-based Organization**: Each module has its own dedicated test file, improving test maintainability and code discoverability
+
+### Shared Test Configuration
+
+The project continues to use `tests/conftest.py` for shared test configuration and fixtures:
+
+- Common path setup for all test files (sys.path manipulation)
+- Shared fixtures for common mocking patterns
+- Standardized test utilities and helper functions
+- Dependency injection fixtures for testing functions with external dependencies

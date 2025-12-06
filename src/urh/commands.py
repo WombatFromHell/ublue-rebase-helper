@@ -329,7 +329,10 @@ class CommandRegistry:
                 items = [ListItem("", url, url) for url in options]
 
                 # Get current deployment info for persistent header
-                from .deployment import get_current_deployment_info, format_deployment_header
+                from .deployment import (
+                    format_deployment_header,
+                    get_current_deployment_info,
+                )
 
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
@@ -371,7 +374,10 @@ class CommandRegistry:
                 items = [ListItem("", url, url) for url in options]
 
                 # Get current deployment info for persistent header
-                from .deployment import get_current_deployment_info, format_deployment_header
+                from .deployment import (
+                    format_deployment_header,
+                    get_current_deployment_info,
+                )
 
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
@@ -468,7 +474,10 @@ class CommandRegistry:
                 ]
 
                 # Get current deployment info for persistent header
-                from .deployment import get_current_deployment_info, format_deployment_header
+                from .deployment import (
+                    format_deployment_header,
+                    get_current_deployment_info,
+                )
 
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
@@ -543,7 +552,10 @@ class CommandRegistry:
                 ]
 
                 # Get current deployment info for persistent header
-                from .deployment import get_current_deployment_info, format_deployment_header
+                from .deployment import (
+                    format_deployment_header,
+                    get_current_deployment_info,
+                )
 
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
@@ -603,7 +615,10 @@ class CommandRegistry:
                 ][::-1]
 
                 # Get current deployment info for persistent header
-                from .deployment import get_current_deployment_info, format_deployment_header
+                from .deployment import (
+                    format_deployment_header,
+                    get_current_deployment_info,
+                )
 
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
@@ -671,7 +686,10 @@ class CommandRegistry:
                 ]
 
                 # Get current deployment info for persistent header
-                from .deployment import get_current_deployment_info, format_deployment_header
+                from .deployment import (
+                    format_deployment_header,
+                    get_current_deployment_info,
+                )
 
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)

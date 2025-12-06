@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Dict, List, Optional
 
+# Import here to avoid circular import
+from .validators import is_valid_deployment_info
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -140,10 +143,6 @@ def get_deployment_info() -> List[DeploymentInfo]:
     if status_output:
         return parse_deployment_info(status_output)
     return []
-
-
-# Import here to avoid circular import
-from .validators import is_valid_deployment_info
 
 
 def get_current_deployment_info() -> Optional[Dict[str, str]]:

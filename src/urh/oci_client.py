@@ -10,26 +10,8 @@ from typing import Any, Dict, List, NamedTuple, Optional
 from .config import get_config
 from .system import extract_context_from_url
 
-
-class DynamicLogger:
-    """A logger that dynamically accesses the main module's logger when called."""
-
-    def __getattr__(self, name):
-        # Try to get the main module logger for consistency
-        try:
-            from . import logger
-            if logger:
-                return getattr(logger, name)
-        except ImportError:
-            pass
-
-        # Fallback to module-specific logger if main module logger not available
-        module_logger = logging.getLogger(__name__)
-        return getattr(module_logger, name)
-
-
-# Set up logging with dynamic access to support patching
-logger = DynamicLogger()
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class CurlResult(NamedTuple):
