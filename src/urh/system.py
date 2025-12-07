@@ -29,6 +29,10 @@ def run_command(cmd: List[str], timeout: Optional[int] = None) -> int:
             f"Command timed out after {timeout}s: {' '.join(cmd)}"
         )  # Also print for user visibility
         return 124  # Standard timeout exit code
+    except Exception as e:
+        logger.error(f"Error running command: {e}")
+        print(f"Error running command: {e}")  # Also print for user visibility
+        return 1  # Return error code for any other type of exception
 
 
 def run_command_safe(base_cmd: str, *args: str, timeout: Optional[int] = 300) -> int:
@@ -57,6 +61,10 @@ def run_command_safe(base_cmd: str, *args: str, timeout: Optional[int] = 300) ->
             f"Command timed out after {timeout}s: {' '.join(cmd)}"
         )  # Also print for user visibility
         return 124  # Standard timeout exit code
+    except Exception as e:
+        logger.error(f"Error running command: {e}")
+        print(f"Error running command: {e}")  # Also print for user visibility
+        return 1  # Return error code for any other type of exception
 
 
 def check_curl_presence() -> bool:

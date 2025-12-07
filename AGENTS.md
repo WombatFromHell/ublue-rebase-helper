@@ -20,11 +20,10 @@ When running tests, AI agents should use the following command `uv run pytest`.
 
 For more specific test runs, agents can use standard pytest options:
 
-- `uv run pytest tests/test_units.py` - run unit tests
-- `uv run pytest tests/test_integrations.py` - run integration tests
-- `uv run pytest tests/test_e2e.py` - run end-to-end tests
-- `uv run pytest -v` - run with verbose output
-- `uv run slipcover -m pytest -v` - run with test harness for code coverage report
+- `uv run pytest -v` - run full test suite with verbose output
+- `uv run pytest -v --cov=src --cov-report=term-missing` run test suite with `pytest-cov` code coverage report
+- Measure Halstead metrics via Radon with the command: `uv run radon hal src/`
+- Measure cyclomatic code complexity via Radon using letter grades with the command: `uv run radon cc src/ -a`
 
 ## Code Formatting and Linting
 
@@ -42,6 +41,7 @@ Formatting and linting should be run before finishing any code changes.
 - After making changes to markdown files, run our prettier command above to format them
 - Run `pyright` to check for type errors
 - Run `uv run pytest -vs` to ensure all tests pass
+- Run `uv run radon cc src/ -a` to ensure our code complexity stays at A or better
 
 ## Project Structure
 

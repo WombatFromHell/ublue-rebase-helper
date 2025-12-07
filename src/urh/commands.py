@@ -364,44 +364,51 @@ class CommandRegistry:
         from .config import get_config
 
         config = get_config()
+        url = self._get_url_for_remote_ls(args, config)
 
+        if url is None:
+            return  # User cancelled selection
+
+        self._display_tags_for_url(url)
+
+    def _get_url_for_remote_ls(self, args: List[str], config) -> Optional[str]:
+        """Get URL from arguments or user selection for remote-ls."""
         if not args:
             try:
-                # Show submenu using ListItem instead of MenuItem
-                from .models import ListItem  # Import here to avoid circular import
-
-                options: List[str] = list(config.container_urls.options)
-                items = [ListItem("", url, url) for url in options]
-
-                # Get current deployment info for persistent header
-                from .deployment import (
-                    format_deployment_header,
-                    get_current_deployment_info,
-                )
-
-                deployment_info_header = get_current_deployment_info()
-                persistent_header = format_deployment_header(deployment_info_header)
-
-                selected = _menu_system.show_menu(
-                    items,
-                    "Select container image (ESC to cancel):",
-                    persistent_header=persistent_header,
-                    is_main_menu=False,
-                )
-
-                if selected is None:
-                    return
-
-                url = selected
-            except MenuExitException as _:
+                return self._select_url_for_remote_ls(config)
+            except MenuExitException:
                 # ESC pressed in submenu, return to main menu
-                return
+                return None
         else:
-            url = args[0]
+            return args[0]
 
-        # Extract repository from URL
+    def _select_url_for_remote_ls(self, config) -> Optional[str]:
+        """Show menu to select URL for remote-ls."""
+        from .deployment import format_deployment_header, get_current_deployment_info
+        from .models import ListItem
+
+        # Show submenu using ListItem instead of MenuItem
+        options: List[str] = list(config.container_urls.options)
+        items = [ListItem("", url, url) for url in options]
+
+        # Get current deployment info for persistent header
+        deployment_info_header = get_current_deployment_info()
+        persistent_header = format_deployment_header(deployment_info_header)
+
+        selected = _menu_system.show_menu(
+            items,
+            "Select container image (ESC to cancel):",
+            persistent_header=persistent_header,
+            is_main_menu=False,
+        )
+
+        return selected
+
+    def _display_tags_for_url(self, url: str) -> None:
+        """Display tags for the given URL."""
         from .system import extract_repository_from_url
 
+        # Extract repository from URL
         repository = extract_repository_from_url(url)
 
         # Create OCI client and fetch tags
@@ -443,82 +450,82 @@ class CommandRegistry:
             print("No deployments found.")  # Keep as print for test compatibility
             return
 
-        deployment_num = None  # Initialize variable
+        deployment_num = self._get_deployment_number_for_pin(args, deployments)
+
+        if deployment_num is None:
+            return  # User cancelled or invalid input
+
+        cmd = ["sudo", "ostree", "admin", "pin", str(deployment_num)]
+        sys.exit(_run_command(cmd))
+
+    def _get_deployment_number_for_pin(
+        self, args: List[str], deployments: List
+    ) -> Optional[int]:
+        """Get deployment number from arguments or user selection for pinning."""
 
         if not args:
             try:
-                # Check if there are any unpinned deployments first
-                from .models import ListItem  # Import here to avoid circular import
-
-                unpinned_deployments = [d for d in deployments if not d.is_pinned]
-
-                if not unpinned_deployments:
-                    print(
-                        "No deployments available to pin."
-                    )  # Keep this user-facing message
-                    return
-
-                # Show ALL deployments in ascending order (newest first)
-                # This allows users to see which deployments are already pinned
-                all_deployments = deployments[
-                    ::-1
-                ]  # Reverse order to show newest first
-
-                items = [
-                    ListItem(
-                        "",
-                        f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
-                        d.deployment_index,
-                    )
-                    for d in all_deployments
-                ]
-
-                # Get current deployment info for persistent header
-                from .deployment import (
-                    format_deployment_header,
-                    get_current_deployment_info,
-                )
-
-                deployment_info_header = get_current_deployment_info()
-                persistent_header = format_deployment_header(deployment_info_header)
-
-                selected = _menu_system.show_menu(
-                    items,
-                    "Select deployment to pin (ESC to cancel):",
-                    persistent_header=persistent_header,
-                    is_main_menu=False,
-                )
-
-                if selected is None:
-                    return
-
-                # Validate that the selected deployment is not already pinned
-                selected_deployment = next(
-                    (d for d in all_deployments if d.deployment_index == selected), None
-                )
-                if selected_deployment and selected_deployment.is_pinned:
-                    print(f"Deployment {selected} is already pinned.")
-                    return
-
-                deployment_num = selected
-            except MenuExitException as _:
+                return self._select_deployment_to_pin(deployments)
+            except MenuExitException:
                 # ESC pressed in submenu, return to main menu
-                return
+                return None
         else:
             try:
-                deployment_num = int(args[0])
+                return int(args[0])
             except ValueError:
                 print(
                     f"Invalid deployment number: {args[0]}"
                 )  # Keep as print for test compatibility
                 sys.exit(1)
-                return  # Exit after error to avoid executing the command
 
-        if deployment_num is not None:
-            cmd = ["sudo", "ostree", "admin", "pin", str(deployment_num)]
-            from .commands import _run_command
+    def _select_deployment_to_pin(self, deployments: List) -> Optional[int]:
+        """Show menu to select deployment for pinning."""
+        from .deployment import format_deployment_header, get_current_deployment_info
+        from .models import ListItem
 
-            sys.exit(_run_command(cmd))
+        # Check if there are any unpinned deployments first
+        unpinned_deployments = [d for d in deployments if not d.is_pinned]
+
+        if not unpinned_deployments:
+            print("No deployments available to pin.")  # Keep this user-facing message
+            return None
+
+        # Show ALL deployments in ascending order (newest first)
+        # This allows users to see which deployments are already pinned
+        all_deployments = deployments[::-1]  # Reverse order to show newest first
+
+        items = [
+            ListItem(
+                "",
+                f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
+                d.deployment_index,
+            )
+            for d in all_deployments
+        ]
+
+        # Get current deployment info for persistent header
+        deployment_info_header = get_current_deployment_info()
+        persistent_header = format_deployment_header(deployment_info_header)
+
+        selected = _menu_system.show_menu(
+            items,
+            "Select deployment to pin (ESC to cancel):",
+            persistent_header=persistent_header,
+            is_main_menu=False,
+        )
+
+        if selected is None:
+            return None
+
+        # Validate that the selected deployment is not already pinned
+        selected_deployment = next(
+            (d for d in all_deployments if d.deployment_index == selected), None
+        )
+        if selected_deployment and selected_deployment.is_pinned:
+            print(f"Deployment {selected} is already pinned.")
+            return None
+
+        return selected
 
     def _handle_unpin(self, args: List[str]) -> None:
         """Handle the unpin command."""
@@ -529,66 +536,66 @@ class CommandRegistry:
             print("No deployments found.")  # Keep as print for test compatibility
             return
 
-        deployment_num = None  # Initialize variable
+        deployment_num = self._get_deployment_number_for_unpin(args, deployments)
 
+        if deployment_num is None:
+            return  # User cancelled or invalid input
+
+        cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deployment_num)]
+        sys.exit(_run_command(cmd))
+
+    def _get_deployment_number_for_unpin(
+        self, args: List[str], deployments: List
+    ) -> Optional[int]:
+        """Get deployment number from arguments or user selection for unpinning."""
         if not args:
             try:
-                # Show only pinned deployments
-                from .models import ListItem  # Import here to avoid circular import
-
-                pinned_deployments = [d for d in deployments if d.is_pinned]
-
-                if not pinned_deployments:
-                    print("No deployments are pinned.")
-                    return
-
-                items = [
-                    ListItem(
-                        "",
-                        f"{d.repository} ({d.version}) ({d.deployment_index}*)",
-                        d.deployment_index,
-                    )
-                    for d in pinned_deployments
-                ]
-
-                # Get current deployment info for persistent header
-                from .deployment import (
-                    format_deployment_header,
-                    get_current_deployment_info,
-                )
-
-                deployment_info_header = get_current_deployment_info()
-                persistent_header = format_deployment_header(deployment_info_header)
-
-                selected = _menu_system.show_menu(
-                    items,
-                    "Select deployment to unpin (ESC to cancel):",
-                    persistent_header=persistent_header,
-                    is_main_menu=False,
-                )
-
-                if selected is None:
-                    return
-
-                deployment_num = selected
-            except MenuExitException as _:
+                return self._select_deployment_to_unpin(deployments)
+            except MenuExitException:
                 # ESC pressed in submenu, return to main menu
-                return
+                return None
         else:
             try:
-                deployment_num = int(args[0])
+                return int(args[0])
             except ValueError:
                 print(
                     f"Invalid deployment number: {args[0]}"
                 )  # Keep as print for test compatibility
                 sys.exit(1)
-                return  # Exit after error to avoid executing the command
 
-        if deployment_num is not None:
-            cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deployment_num)]
-            from .commands import _run_command
+    def _select_deployment_to_unpin(self, deployments: List) -> Optional[int]:
+        """Show menu to select deployment for unpinning."""
+        from .deployment import format_deployment_header, get_current_deployment_info
+        from .models import ListItem
 
-            sys.exit(_run_command(cmd))
+        # Show only pinned deployments
+        pinned_deployments = [d for d in deployments if d.is_pinned]
+
+        if not pinned_deployments:
+            print("No deployments are pinned.")
+            return None
+
+        items = [
+            ListItem(
+                "",
+                f"{d.repository} ({d.version}) ({d.deployment_index}*)",
+                d.deployment_index,
+            )
+            for d in pinned_deployments
+        ]
+
+        # Get current deployment info for persistent header
+        deployment_info_header = get_current_deployment_info()
+        persistent_header = format_deployment_header(deployment_info_header)
+
+        selected = _menu_system.show_menu(
+            items,
+            "Select deployment to unpin (ESC to cancel):",
+            persistent_header=persistent_header,
+            is_main_menu=False,
+        )
+
+        return selected
 
     def _handle_rm(self, args: List[str]) -> None:
         """Handle the rm command."""
@@ -662,96 +669,98 @@ class CommandRegistry:
             print("No deployments found.")  # Keep as print for test compatibility
             return
 
-        deployment_num = None  # Initialize variable
+        deployment_num = self._get_deployment_number_for_undeploy(args, deployments)
 
+        if deployment_num is None:
+            return  # User cancelled or invalid input
+
+        cmd = ["sudo", "ostree", "admin", "undeploy", str(deployment_num)]
+        sys.exit(_run_command(cmd))
+
+    def _get_deployment_number_for_undeploy(
+        self, args: List[str], deployments: List
+    ) -> Optional[int]:
+        """Get deployment number from arguments or user selection for undeploying."""
         if not args:
             try:
-                # Show ALL deployments (same as 'pin' command shows all)
-                from .models import (  # Import here to avoid circular import
-                    ListItem,
-                    MenuItem,
+                return self._select_deployment_to_undeploy_with_confirmation(
+                    deployments
                 )
-
-                all_deployments = deployments[
-                    ::-1
-                ]  # Reverse order to show newest first
-
-                items = [
-                    ListItem(
-                        "",
-                        f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
-                        d.deployment_index,
-                    )
-                    for d in all_deployments
-                ]
-
-                # Get current deployment info for persistent header
-                from .deployment import (
-                    format_deployment_header,
-                    get_current_deployment_info,
-                )
-
-                deployment_info_header = get_current_deployment_info()
-                persistent_header = format_deployment_header(deployment_info_header)
-
-                while True:  # Loop to return to selection if user cancels
-                    selected = _menu_system.show_menu(
-                        items,
-                        "Select deployment to undeploy (ESC to cancel):",
-                        persistent_header=persistent_header,
-                        is_main_menu=False,
-                    )
-
-                    if selected is None:
-                        return
-
-                    deployment_num = selected
-
-                    # Get deployment info for confirmation message
-                    selected_deployment = next(
-                        (d for d in all_deployments if d.deployment_index == selected),
-                        None,
-                    )
-
-                    if selected_deployment:
-                        # Show confirmation prompt
-                        confirmation_items = [
-                            MenuItem("Y", "Yes, undeploy this deployment"),
-                            MenuItem("N", "No, cancel undeployment"),
-                        ]
-
-                        confirmation_header = f"Confirm undeployment of:\n  {selected_deployment.repository} ({selected_deployment.version}) ({selected_deployment.deployment_index}{'*' if selected_deployment.is_pinned else ''})"
-                        confirmation = _menu_system.show_menu(
-                            confirmation_items,
-                            confirmation_header,
-                            persistent_header=persistent_header,
-                            is_main_menu=False,
-                        )
-
-                        if confirmation and confirmation.lower() == "y":
-                            # User confirmed, proceed with undeploy
-                            break
-                        else:
-                            # User cancelled, continue to show selection again
-                            continue
-                    else:
-                        # This shouldn't happen in normal flow, but just in case
-                        break
-            except MenuExitException as _:
+            except MenuExitException:
                 # ESC pressed in submenu, return to main menu
-                return
+                return None
         else:
             try:
-                deployment_num = int(args[0])
+                return int(args[0])
             except ValueError:
                 print(
                     f"Invalid deployment number: {args[0]}"
                 )  # Keep as print for test compatibility
                 sys.exit(1)
-                return  # Exit after error to avoid executing the command
 
-        if deployment_num is not None:
-            cmd = ["sudo", "ostree", "admin", "undeploy", str(deployment_num)]
-            from .commands import _run_command
+    def _select_deployment_to_undeploy_with_confirmation(
+        self, deployments: List
+    ) -> Optional[int]:
+        """Show menu to select deployment for undeploying with confirmation."""
+        from .deployment import format_deployment_header, get_current_deployment_info
+        from .models import ListItem, MenuItem
 
-            sys.exit(_run_command(cmd))
+        # Show ALL deployments (same as 'pin' command shows all)
+        all_deployments = deployments[::-1]  # Reverse order to show newest first
+
+        items = [
+            ListItem(
+                "",
+                f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
+                d.deployment_index,
+            )
+            for d in all_deployments
+        ]
+
+        # Get current deployment info for persistent header
+        deployment_info_header = get_current_deployment_info()
+        persistent_header = format_deployment_header(deployment_info_header)
+
+        while True:  # Loop to return to selection if user cancels
+            selected = _menu_system.show_menu(
+                items,
+                "Select deployment to undeploy (ESC to cancel):",
+                persistent_header=persistent_header,
+                is_main_menu=False,
+            )
+
+            if selected is None:
+                return None
+
+            deployment_num = selected
+
+            # Get deployment info for confirmation message
+            selected_deployment = next(
+                (d for d in all_deployments if d.deployment_index == selected),
+                None,
+            )
+
+            if selected_deployment:
+                # Show confirmation prompt
+                confirmation_items = [
+                    MenuItem("Y", "Yes, undeploy this deployment"),
+                    MenuItem("N", "No, cancel undeployment"),
+                ]
+
+                confirmation_header = f"Confirm undeployment of:\n  {selected_deployment.repository} ({selected_deployment.version}) ({selected_deployment.deployment_index}{'*' if selected_deployment.is_pinned else ''})"
+                confirmation = _menu_system.show_menu(
+                    confirmation_items,
+                    confirmation_header,
+                    persistent_header=persistent_header,
+                    is_main_menu=False,
+                )
+
+                if confirmation and confirmation.lower() == "y":
+                    # User confirmed, proceed with undeploy
+                    return deployment_num
+                else:
+                    # User cancelled, continue to show selection again
+                    continue
+            else:
+                # This shouldn't happen in normal flow, but just in case
+                return None

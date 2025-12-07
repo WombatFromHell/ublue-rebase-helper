@@ -103,6 +103,7 @@ This utility is designed to:
 - **Function**: Remove a specific deployment by number
 - **Requires sudo**: Yes
 - **Interactive submenu**: When no `<num>` is specified, provides a submenu showing all deployments with their version information and deployment index numbers in format `(index)` for unpinned deployments and `(index*)` for pinned deployments that allows users to select which deployment to undeploy. The selection maps to the appropriate deployment index. After selection, shows a confirmation modal requiring user to confirm with 'Y' to proceed or 'N' to cancel.
+- **Confirmation Safety**: The undeploy command implements an extra confirmation step after deployment selection to prevent accidental removal of deployments, showing the full deployment details before asking for final confirmation.
 
 #### `upgrade`
 
@@ -126,6 +127,8 @@ When using interactive menus, the utility supports intuitive navigation:
 - When ESC is pressed in the main menu (gum choose), a `MenuExitException(is_main_menu=True)` is raised
 - These exceptions are caught by the main menu loop, which then either exits the program (main menu) or redisplays the main menu (submenus)
 - This provides a consistent user experience where ESC acts as a "back" function in submenus and "exit" in the main menu
+- The main menu runs in a continuous loop to allow users to navigate between different submenus seamlessly after using ESC in submenus
+- The loop includes proper exception handling for both main menu and submenu exits to maintain consistent behavior
 
 ### Persistent Header Feature
 
@@ -207,11 +210,11 @@ Commands are defined using a centralized command registry (`CommandRegistry`) wh
 The `CommandDefinition` dataclass with `__slots__` and `kw_only=True` defines command properties and behavior, enabling centralized command registration. Each command is registered with its name, description, handler function, sudo requirement, conditional sudo function, and whether it has a submenu.
 
 - **Command Definition**: Uses `CommandDefinition` dataclass with `__slots__` and `kw_only=True` to define command properties (name, description, handler, requires_sudo, conditional_sudo_func, has_submenu)
-- **Centralized Registration**: All commands are registered in `CommandRegistry._register_commands()` method with 9 total commands: check, kargs, ls, pin, rebase, remote-ls, rm, rollback, unpin, and upgrade
+- **Centralized Registration**: All commands are registered in `CommandRegistry._register_commands()` method with 11 total commands: check, kargs, ls, pin, rebase, remote-ls, rm, rollback, unpin, undeploy, and upgrade
 - **Handler Functions**: Each command has a dedicated handler function (e.g., `_handle_rebase`, `_handle_pin`) that implements the command-specific logic
 - **Sudo Integration**: Automatically prepends `sudo` to commands that require elevated privileges using `run_command_with_conditional_sudo` function
 - **Conditional Sudo**: Supports conditional sudo requirements through `conditional_sudo_func` that determines sudo needs based on arguments
-- **Submenu Integration**: Commands with submenus (rebase, remote-ls, pin, unpin, rm) provide interactive menu options when no arguments are provided
+- **Submenu Integration**: Commands with submenus (rebase, remote-ls, pin, unpin, rm, undeploy) provide interactive menu options when no arguments are provided
 - **Argument Parsing**: Supports both direct command execution with arguments and interactive menu selection
 - **Generic Argument Parsing**: Uses `ArgumentParser` generic class (with `Generic[T]` and `TypeVar`) for argument validation and prompting
 - **Exit Code Handling**: Properly handles exit codes from underlying system commands using `sys.exit()`
@@ -285,6 +288,7 @@ The `OCIClient` class provides functionality for interacting with OCI Container 
 - **CurlResult**: Uses `NamedTuple` to structure curl operation results
 - **Performance Optimizations**: Added `functools.lru_cache` for compiled regex patterns to improve performance (maxsize=128) and optimized single-request approach for pagination that fetches both data and headers in one call
 - **HTTP/2 Support**: Uses `--http2` flag with curl for improved performance when available
+- **Additional Curl Optimizations**: Added `--compressed` flag for content compression support and `--globoff` to disable URL globbing for improved security and performance
 - **Single-Request Pagination**: The `_fetch_page_with_headers()` method fetches both page data and Link header in a single curl request, significantly improving pagination performance by eliminating separate header requests
 - **Robust Header Parsing**: Handles various line ending formats (CRLF/LF) when parsing response headers and bodies to ensure compatibility across different environments
 
@@ -377,8 +381,10 @@ The utility parses deployment information from `rpm-ostree status -v` output usi
 - **Version Parsing**: Parses version information and handles various version formats including context-prefixed versions
 - **Pinned Status**: Detects pinned status by looking for "Pinned: yes" in the deployment details
 - **Deployment Filtering**: Commands like `pin` show only unpinned deployments, while `unpin` shows only pinned deployments in their menus
-- **Display Ordering**: Deploys are displayed in reverse chronological order (newest first) in the rm command menu
+- **Display Ordering**: Deploys are displayed in reverse chronological order (newest first) in the rm and undeploy command menus
 - **Metadata Handling**: Properly handles additional metadata in parentheses that may appear after version information
+- **Submenu Selection Handling**: Each deployment command properly maps the user's submenu selection to the appropriate deployment index for execution
+- **Selection Validation**: Commands validate that the selected deployment is appropriate for the operation (e.g., pin command ensures the selected deployment is not already pinned)
 
 ### Menu System Architecture
 
@@ -403,6 +409,8 @@ The MenuSystem supports multiple interface modes:
 - **Line Clearing**: Implements line clearing in non-test environments when ESC is pressed to maintain clean console output
 - **Keyboard Interrupt Handling**: Properly handles KeyboardInterrupt in text mode
 - **Menu System Loop**: Implements main menu loop with ESC handling to return to main menu after submenu ESC
+- **Main Menu Loop Behavior**: The main menu runs in a continuous loop that shows the main menu after submenu ESC is pressed, creating a natural workflow where users can navigate between submenus and the main menu seamlessly
+- **Non-TTY Mode Behavior**: In non-TTY environments (like when output is piped), the menu system displays available options and shows a message indicating how to run the tool with a specific option
 
 ### Modern Python 3.11+ Features
 
@@ -547,7 +555,7 @@ The test suite uses the following dependencies:
 
 - `pytest`: Core testing framework
 - `pytest-mock`: For mocking capabilities in tests
-- `slipcover`: For code coverage analysis
+- `pytest-cov`: For code coverage analysis
 
 ### Current Test Infrastructure
 
@@ -564,7 +572,7 @@ The test suite leverages modern pytest features to minimize code duplication and
 Tests are organized using parametrization patterns that consolidate similar functionality:
 
 - **Command Handler Parametrization**: Single parametrized tests cover multiple command variants, with special handling for commands that require different logic.
-- **Deployment Command Consolidation**: Pin, unpin, and rm command tests use shared parametrized fixtures to test deployment scenarios with consistent setup.
+- **Deployment Command Consolidation**: Pin, unpin, rm, and undeploy command tests use shared parametrized fixtures to test deployment scenarios with consistent setup.
 - **Menu System Patterns**: Comprehensive parametrization covers different menu modes (gum, text, non-TTY) and error handling scenarios.
 - **OCI Client Testing**: Advanced parametrization enables testing of various OCI scenarios including pagination, token management, and context filtering.
 

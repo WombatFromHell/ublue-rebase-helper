@@ -62,7 +62,13 @@ class OCITokenManager:
 
         try:
             result = subprocess.run(
-                ["curl", "-s", url],  # Added -s for silent mode
+                [
+                    "curl",
+                    "-s",
+                    "--http2",
+                    "--compressed",
+                    url,
+                ],  # Added -s for silent mode, --http2 for performance, --compressed for content compression
                 capture_output=True,
                 text=True,
                 check=True,

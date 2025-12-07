@@ -47,7 +47,15 @@ class OCIClient:
         timeout: int = 30,
     ) -> CurlResult:
         """Unified curl wrapper with optional header capture."""
-        cmd = ["curl", "-s", "--max-time", str(timeout)]
+        cmd = [
+            "curl",
+            "-s",
+            "--http2",
+            "--max-time",
+            str(timeout),
+            "--globoff",
+            "--compressed",
+        ]
 
         if capture_status_code:
             # Write HTTP status code to stdout
@@ -62,12 +70,19 @@ class OCIClient:
 
         cmd.extend(["-H", f"Authorization: Bearer {token}", url])
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,  # Don't raise exception on non-zero exit
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,  # Don't raise exception on non-zero exit
+            )
+        except subprocess.TimeoutExpired:
+            # Return an error result when timeout occurs
+            return CurlResult("", "Command timed out", 124)
+        except FileNotFoundError:
+            # Return an error result when curl is not found
+            return CurlResult("", "Command not found", 1)
 
         headers = None
         stdout = result.stdout
@@ -106,6 +121,8 @@ class OCIClient:
             cmd = [
                 "curl",
                 "-s",
+                "--http2",
+                "--compressed",
                 "-w",
                 "%{http_code}",  # Write HTTP status code
                 "-o",

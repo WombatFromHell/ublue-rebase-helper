@@ -8,7 +8,7 @@ import sys
 # Add the parent directory to the path so modules can be found
 sys.path.insert(0, os.path.dirname(__file__))
 
-from src.urh.cli import main as cli_main
+from urh.cli import main as cli_main
 
 
 def main():
