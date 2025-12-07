@@ -26,17 +26,15 @@ install: $(OUT)
 	echo "Installed to $$INSTALL_DIR/urh.pyz"
 
 test:
-	uv run pytest -xvs --cov=src --cov-report=term-missing
+	uv run pytest -v --cov=src --cov-report=term-missing
 
 clean:
+	find . -type d -name "__pycache__" -exec rm -rf {} +; \
 	rm -rf \
 		$(STAGING) \
 		$(BUILD_DIR) \
 		.pytest_cache \
 		.ruff_cache \
-		./src/__pycache__ \
-		./src/urh/__pycache__ \
-		./tests/__pycache__ \
 		.coverage
 
 all: clean build install
