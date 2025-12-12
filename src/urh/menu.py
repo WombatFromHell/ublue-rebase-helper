@@ -6,7 +6,7 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Any, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from .models import GumCommand, MenuItem
 
@@ -73,57 +73,90 @@ class MenuSystem:
         is_main_menu: bool,
     ) -> Optional[Any]:
         """Show menu using gum with builder pattern."""
-        options = [item.display_text for item in items]
+        options = self._create_gum_options(items)
+        gum_cmd = self._create_gum_command(options, header, persistent_header)
 
-        # Set height to show all options in the menu
-        # Use the exact number of options to display them all without scrolling
-        gum_cmd = GumCommand(
+        try:
+            result = self._execute_gum_command(gum_cmd)
+            selected_text = result.stdout.strip()
+
+            return self._process_gum_selection(selected_text, items)
+
+        except subprocess.CalledProcessError as e:
+            return self._handle_gum_error(e, is_main_menu)
+        except subprocess.TimeoutExpired:
+            return self._handle_gum_timeout()
+
+    def _create_gum_options(self, items: Sequence[MenuItem]) -> List[str]:
+        """Create gum menu options from menu items."""
+        return [item.display_text for item in items]
+
+    def _create_gum_command(
+        self, options: List[str], header: str, persistent_header: Optional[str]
+    ) -> GumCommand:
+        """Create a GumCommand with appropriate settings."""
+        return GumCommand(
             options=options,
             header=header,
             persistent_header=persistent_header,
             height=len(options),  # Show all options
         )
 
-        try:
-            result = subprocess.run(
-                gum_cmd.build(),
-                text=True,
-                stdout=subprocess.PIPE,
-                check=True,
-                timeout=gum_cmd.timeout,  # 5 minute timeout
+    def _execute_gum_command(
+        self, gum_cmd: GumCommand
+    ) -> subprocess.CompletedProcess[str]:
+        """Execute the gum command and return the result."""
+        return subprocess.run(
+            gum_cmd.build(),
+            text=True,
+            stdout=subprocess.PIPE,
+            check=True,
+            timeout=gum_cmd.timeout,  # 5 minute timeout
+        )
+
+    def _process_gum_selection(
+        self, selected_text: str, items: Sequence[MenuItem]
+    ) -> Optional[Any]:
+        """Process the gum selection and return the appropriate value."""
+        # Use walrus operator and next() for cleaner lookup
+        if selected := next(
+            (item for item in items if item.display_text == selected_text), None
+        ):
+            return (
+                selected.key
+                if selected.key and selected.key.strip()
+                else selected.value
             )
-            selected_text = result.stdout.strip()
+        return None
 
-            # Use walrus operator and next() for cleaner lookup
-            if selected := next(
-                (item for item in items if item.display_text == selected_text), None
-            ):
-                return (
-                    selected.key
-                    if selected.key and selected.key.strip()
-                    else selected.value
-                )
+    def _handle_gum_error(
+        self, e: subprocess.CalledProcessError, is_main_menu: bool
+    ) -> Optional[Any]:
+        """Handle gum command errors."""
+        if e.returncode == 1:
+            # ESC pressed
+            return self._handle_esc_pressed(is_main_menu)
+        return None
 
+    def _handle_esc_pressed(self, is_main_menu: bool) -> Optional[Any]:
+        """Handle ESC key press in gum menu."""
+        # Check if we're in a test that expects different behavior
+        if "URH_TEST_NO_EXCEPTION" in os.environ:
+            print("No option selected.")
             return None
-        except subprocess.CalledProcessError as e:
-            if e.returncode == 1:
-                # ESC pressed
-                # Check if we're in a test that expects different behavior
-                if "URH_TEST_NO_EXCEPTION" in os.environ:
-                    print("No option selected.")
-                    return None
-                else:
-                    # Clear the line in non-test environments
-                    if "PYTEST_CURRENT_TEST" not in os.environ:
-                        sys.stdout.write("\033[F\033[K")
-                        sys.stdout.flush()
+        else:
+            # Clear the line in non-test environments
+            if "PYTEST_CURRENT_TEST" not in os.environ:
+                sys.stdout.write("\033[F\033[K")
+                sys.stdout.flush()
 
-                    raise MenuExitException(is_main_menu=is_main_menu)
-            return None
-        except subprocess.TimeoutExpired:
-            logger.warning("Menu selection timed out.")
-            print("Menu selection timed out.")
-            return None
+            raise MenuExitException(is_main_menu=is_main_menu)
+
+    def _handle_gum_timeout(self) -> Optional[Any]:
+        """Handle gum menu timeout."""
+        logger.warning("Menu selection timed out.")
+        print("Menu selection timed out.")
+        return None
 
     def _show_text_menu(
         self,
@@ -133,37 +166,74 @@ class MenuSystem:
         is_main_menu: bool,
     ) -> Optional[Any]:
         """Show menu using plain text."""
+        self._display_text_menu_header(persistent_header, header)
+        self._display_text_menu_items(items)
+
+        return self._process_text_menu_input(items, is_main_menu)
+
+    def _display_text_menu_header(
+        self, persistent_header: Optional[str], header: str
+    ) -> None:
+        """Display the text menu header."""
         if persistent_header:
             print(persistent_header)
         print(header)
         print("Press ESC to cancel")
 
+    def _display_text_menu_items(self, items: Sequence[MenuItem]) -> None:
+        """Display the text menu items."""
         for i, item in enumerate(items, 1):
             print(f"{i}. {item.display_text}")
 
+    def _process_text_menu_input(
+        self, items: Sequence[MenuItem], is_main_menu: bool
+    ) -> Optional[Any]:
+        """Process text menu input and return the selected value."""
         while True:
             try:
-                choice = input("\nEnter choice (number): ").strip()
+                choice = self._get_user_choice()
                 if not choice:
                     return None
 
-                choice_num = int(choice)
-                if 1 <= choice_num <= len(items):
-                    # If item has a meaningful key (non-empty), return it; otherwise return value
-                    item = items[choice_num - 1]
-                    if item.key and item.key.strip():
-                        return item.key
-                    else:
-                        return item.value
-                else:
-                    print("Invalid choice. Please try again.")
+                choice_num = self._parse_choice_number(choice, items)
+                return self._handle_valid_choice(choice_num, items)
+
             except ValueError:
-                print("Invalid choice. Please try again.")
+                self._handle_invalid_choice()
             except KeyboardInterrupt:
-                if is_main_menu:
-                    sys.exit(0)
-                else:
-                    return None
+                return self._handle_keyboard_interrupt(is_main_menu)
+
+    def _get_user_choice(self) -> str:
+        """Get user choice input."""
+        return input("\nEnter choice (number): ").strip()
+
+    def _parse_choice_number(self, choice: str, items: Sequence[MenuItem]) -> int:
+        """Parse and validate the choice number."""
+        choice_num = int(choice)
+        if 1 <= choice_num <= len(items):
+            return choice_num
+        raise ValueError("Invalid choice")
+
+    def _handle_valid_choice(
+        self, choice_num: int, items: Sequence[MenuItem]
+    ) -> Optional[Any]:
+        """Handle a valid choice and return the appropriate value."""
+        item = items[choice_num - 1]
+        if item.key and item.key.strip():
+            return item.key
+        else:
+            return item.value
+
+    def _handle_invalid_choice(self) -> None:
+        """Handle an invalid choice."""
+        print("Invalid choice. Please try again.")
+
+    def _handle_keyboard_interrupt(self, is_main_menu: bool) -> Optional[Any]:
+        """Handle keyboard interrupt (ESC)."""
+        if is_main_menu:
+            sys.exit(0)
+        else:
+            return None
 
 
 # Global menu system instance

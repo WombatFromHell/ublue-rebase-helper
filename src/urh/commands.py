@@ -478,23 +478,19 @@ class CommandRegistry:
                 )  # Keep as print for test compatibility
                 sys.exit(1)
 
-    def _select_deployment_to_pin(self, deployments: List) -> Optional[int]:
-        """Show menu to select deployment for pinning."""
-        from .deployment import format_deployment_header, get_current_deployment_info
+    def _filter_unpinned_deployments(self, deployments: List) -> List:
+        """Filter deployments to get only unpinned ones."""
+        return [d for d in deployments if not d.is_pinned]
+
+    def _create_deployment_menu_items(self, deployments: List) -> List:
+        """Create menu items for deployment selection."""
         from .models import ListItem
-
-        # Check if there are any unpinned deployments first
-        unpinned_deployments = [d for d in deployments if not d.is_pinned]
-
-        if not unpinned_deployments:
-            print("No deployments available to pin.")  # Keep this user-facing message
-            return None
 
         # Show ALL deployments in ascending order (newest first)
         # This allows users to see which deployments are already pinned
         all_deployments = deployments[::-1]  # Reverse order to show newest first
 
-        items = [
+        return [
             ListItem(
                 "",
                 f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
@@ -503,10 +499,42 @@ class CommandRegistry:
             for d in all_deployments
         ]
 
-        # Get current deployment info for persistent header
-        deployment_info_header = get_current_deployment_info()
-        persistent_header = format_deployment_header(deployment_info_header)
+    def _get_deployment_header(self) -> str:
+        """Get current deployment info for persistent header."""
+        from .deployment import format_deployment_header, get_current_deployment_info
 
+        deployment_info_header = get_current_deployment_info()
+        return format_deployment_header(deployment_info_header)
+
+    def _validate_deployment_not_pinned(
+        self, deployments: List, selected_index: int
+    ) -> bool:
+        """Validate that selected deployment is not already pinned."""
+        all_deployments = deployments[::-1]  # Reverse order to show newest first
+        selected_deployment = next(
+            (d for d in all_deployments if d.deployment_index == selected_index), None
+        )
+        if selected_deployment and selected_deployment.is_pinned:
+            print(f"Deployment {selected_index} is already pinned.")
+            return False
+        return True
+
+    def _select_deployment_to_pin(self, deployments: List) -> Optional[int]:
+        """Show menu to select deployment for pinning."""
+        # Check if there are any unpinned deployments first
+        unpinned_deployments = self._filter_unpinned_deployments(deployments)
+
+        if not unpinned_deployments:
+            print("No deployments available to pin.")  # Keep this user-facing message
+            return None
+
+        # Create menu items
+        items = self._create_deployment_menu_items(deployments)
+
+        # Get persistent header
+        persistent_header = self._get_deployment_header()
+
+        # Show menu and get selection
         selected = _menu_system.show_menu(
             items,
             "Select deployment to pin (ESC to cancel):",
@@ -517,12 +545,8 @@ class CommandRegistry:
         if selected is None:
             return None
 
-        # Validate that the selected deployment is not already pinned
-        selected_deployment = next(
-            (d for d in all_deployments if d.deployment_index == selected), None
-        )
-        if selected_deployment and selected_deployment.is_pinned:
-            print(f"Deployment {selected} is already pinned.")
+        # Validate selection
+        if not self._validate_deployment_not_pinned(deployments, selected):
             return None
 
         return selected
@@ -698,28 +722,42 @@ class CommandRegistry:
                 )  # Keep as print for test compatibility
                 sys.exit(1)
 
+    def _create_undeploy_confirmation_items(self) -> List:
+        """Create confirmation menu items for undeploy operation."""
+        from .models import MenuItem
+
+        return [
+            MenuItem("Y", "Yes, undeploy this deployment"),
+            MenuItem("N", "No, cancel undeployment"),
+        ]
+
+    def _get_undeploy_confirmation_header(self, deployment) -> str:
+        """Get confirmation header for undeploy operation."""
+        return f"Confirm undeployment of:\n  {deployment.repository} ({deployment.version}) ({deployment.deployment_index}{'*' if deployment.is_pinned else ''})"
+
+    def _get_selected_deployment_info(self, deployments: List, selected_index: int):
+        """Get deployment info for the selected deployment index."""
+        all_deployments = deployments[::-1]  # Reverse order to show newest first
+        return next(
+            (d for d in all_deployments if d.deployment_index == selected_index),
+            None,
+        )
+
     def _select_deployment_to_undeploy_with_confirmation(
         self, deployments: List
     ) -> Optional[int]:
         """Show menu to select deployment for undeploying with confirmation."""
         from .deployment import format_deployment_header, get_current_deployment_info
-        from .models import ListItem, MenuItem
+        from .models import ListItem
 
         # Show ALL deployments (same as 'pin' command shows all)
         all_deployments = deployments[::-1]  # Reverse order to show newest first
 
-        items = [
-            ListItem(
-                "",
-                f"{d.repository} ({d.version}) ({d.deployment_index}{'*' if d.is_pinned else ''})",
-                d.deployment_index,
-            )
-            for d in all_deployments
-        ]
+        # Create menu items using existing helper
+        items = self._create_deployment_menu_items(deployments)
 
-        # Get current deployment info for persistent header
-        deployment_info_header = get_current_deployment_info()
-        persistent_header = format_deployment_header(deployment_info_header)
+        # Get persistent header using existing helper
+        persistent_header = self._get_deployment_header()
 
         while True:  # Loop to return to selection if user cancels
             selected = _menu_system.show_menu(
@@ -735,19 +773,19 @@ class CommandRegistry:
             deployment_num = selected
 
             # Get deployment info for confirmation message
-            selected_deployment = next(
-                (d for d in all_deployments if d.deployment_index == selected),
-                None,
+            selected_deployment = self._get_selected_deployment_info(
+                deployments, selected
             )
 
             if selected_deployment:
-                # Show confirmation prompt
-                confirmation_items = [
-                    MenuItem("Y", "Yes, undeploy this deployment"),
-                    MenuItem("N", "No, cancel undeployment"),
-                ]
+                # Create confirmation items
+                confirmation_items = self._create_undeploy_confirmation_items()
 
-                confirmation_header = f"Confirm undeployment of:\n  {selected_deployment.repository} ({selected_deployment.version}) ({selected_deployment.deployment_index}{'*' if selected_deployment.is_pinned else ''})"
+                # Create confirmation header
+                confirmation_header = self._get_undeploy_confirmation_header(
+                    selected_deployment
+                )
+
                 confirmation = _menu_system.show_menu(
                     confirmation_items,
                     confirmation_header,

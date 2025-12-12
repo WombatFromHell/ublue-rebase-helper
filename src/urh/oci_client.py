@@ -5,7 +5,7 @@ OCI client implementation for ublue-rebase-helper.
 import json
 import logging
 import subprocess
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from .config import get_config
 from .system import extract_context_from_url
@@ -36,7 +36,7 @@ class OCIClient:
 
         self.token_manager = OCITokenManager(repository, cache_path)
 
-    def _curl(
+    def _build_curl_command_with_options(
         self,
         url: str,
         token: str,
@@ -45,8 +45,8 @@ class OCIClient:
         capture_body: bool = True,
         capture_status_code: bool = False,
         timeout: int = 30,
-    ) -> CurlResult:
-        """Unified curl wrapper with optional header capture."""
+    ) -> List[str]:
+        """Build curl command with various options."""
         cmd = [
             "curl",
             "-s",
@@ -69,32 +69,75 @@ class OCIClient:
             cmd.extend(["-o", "/dev/null"])
 
         cmd.extend(["-H", f"Authorization: Bearer {token}", url])
+        return cmd
 
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,  # Don't raise exception on non-zero exit
-            )
-        except subprocess.TimeoutExpired:
+    def _handle_curl_errors(self, error: Exception) -> CurlResult:
+        """Handle curl execution errors."""
+        if isinstance(error, subprocess.TimeoutExpired):
             # Return an error result when timeout occurs
             return CurlResult("", "Command timed out", 124)
-        except FileNotFoundError:
+        elif isinstance(error, FileNotFoundError):
             # Return an error result when curl is not found
             return CurlResult("", "Command not found", 1)
+        else:
+            # Return a generic error result
+            return CurlResult("", str(error), 1)
 
+    def _extract_headers_from_response(
+        self, stdout: str, capture_headers: bool, capture_status_code: bool
+    ) -> tuple[str, Optional[Dict[str, str]]]:
+        """Extract headers from curl response if needed."""
         headers = None
-        stdout = result.stdout
 
-        if capture_headers and result.returncode == 0 and not capture_status_code:
+        if capture_headers and not capture_status_code:
             # Split headers and body
             parts = stdout.split("\r\n\r\n", 1)
             if len(parts) == 2:
                 headers = self._parse_headers(parts[0])
                 stdout = parts[1]
 
-        return CurlResult(stdout, result.stderr, result.returncode, headers)
+        return stdout, headers
+
+    def _curl(
+        self,
+        url: str,
+        token: str,
+        *,
+        capture_headers: bool = False,
+        capture_body: bool = True,
+        capture_status_code: bool = False,
+        timeout: int = 30,
+    ) -> CurlResult:
+        """Unified curl wrapper with optional header capture."""
+        try:
+            # Build curl command
+            cmd = self._build_curl_command_with_options(
+                url,
+                token,
+                capture_headers=capture_headers,
+                capture_body=capture_body,
+                capture_status_code=capture_status_code,
+                timeout=timeout,
+            )
+
+            # Execute curl command
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,  # Don't raise exception on non-zero exit
+            )
+
+            # Extract headers if needed
+            stdout, headers = self._extract_headers_from_response(
+                result.stdout, capture_headers, capture_status_code
+            )
+
+            return CurlResult(stdout, result.stderr, result.returncode, headers)
+
+        except Exception as error:
+            # Handle any errors that occur during curl execution
+            return self._handle_curl_errors(error)
 
     def _parse_headers(self, header_text: str) -> Dict[str, str]:
         """Parse HTTP headers from text."""
@@ -191,17 +234,55 @@ class OCIClient:
             logger.error(f"Error during token validation: {e}")
             return None
 
+    def _validate_token(self) -> Optional[str]:
+        """Get and validate authentication token."""
+        token = self.token_manager.get_token()
+        if not token:
+            logger.error("Could not obtain authentication token")
+            return None
+        return token
+
+    def _normalize_pagination_url(self, url: str) -> str:
+        """Normalize pagination URL to full URL format."""
+        if url.startswith("http"):
+            return url
+        elif url.startswith("/"):
+            return f"https://ghcr.io{url}"
+        else:
+            return f"https://ghcr.io/{url}"
+
+    def _handle_page_fetch_error(
+        self, page_count: int, all_tags: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Handle page fetch errors and return partial results if available."""
+        logger.error(f"Failed to fetch page {page_count}")
+        if all_tags:
+            logger.warning(f"Returning {len(all_tags)} tags collected so far")
+            return {"tags": all_tags}
+        return None
+
+    def _log_pagination_progress(
+        self, page_count: int, page_tags: List[str], all_tags: List[str], full_url: str
+    ) -> None:
+        """Log pagination progress information."""
+        logger.debug(f"Page {page_count}: {full_url}")
+        if page_tags:
+            logger.debug(
+                f"Page {page_count}: {len(page_tags)} tags (total: {len(all_tags)})"
+            )
+
     def get_all_tags(
         self, context_url: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get all tags with optimized single-request-per-page approach.
         """
-        token = self.token_manager.get_token()
+        # Validate token
+        token = self._validate_token()
         if not token:
-            logger.error("Could not obtain authentication token")
             return None
 
+        # Initialize pagination
         base_url = f"https://ghcr.io/v2/{self.repository}/tags/list"
         next_url = f"{base_url}?n=200"
         all_tags: List[str] = []
@@ -212,40 +293,34 @@ class OCIClient:
         target_name = context_url if context_url else self.repository
         logger.debug(f"Starting pagination for: {target_name}")
 
+        # Pagination loop
         while next_url and page_count < max_pages:
             page_count += 1
 
-            # Construct full URL
-            if next_url.startswith("http"):
-                full_url = next_url
-            elif next_url.startswith("/"):
-                full_url = f"https://ghcr.io{next_url}"
-            else:
-                full_url = f"https://ghcr.io/{next_url}"
+            # Normalize URL
+            full_url = self._normalize_pagination_url(next_url)
 
+            # Log progress
             logger.debug(f"Page {page_count}: {full_url}")
 
-            # NEW: Fetch page data AND next URL in single request
+            # Fetch page data AND next URL in single request
             page_data, next_url = self._fetch_page_with_headers(full_url, token)
 
+            # Handle fetch errors
             if not page_data:
-                logger.error(f"Failed to fetch page {page_count}")
-                if all_tags:
-                    logger.warning(f"Returning {len(all_tags)} tags collected so far")
-                    return {"tags": all_tags}
-                return None
+                return self._handle_page_fetch_error(page_count, all_tags)
 
             # Accumulate tags
             page_tags = page_data.get("tags", [])
             if page_tags:
                 all_tags.extend(page_tags)
-                logger.debug(
-                    f"Page {page_count}: {len(page_tags)} tags (total: {len(all_tags)})"
-                )
+                self._log_pagination_progress(page_count, page_tags, all_tags, full_url)
 
+        # Check if we hit page limit
         if page_count >= max_pages:
             logger.warning(f"Hit maximum page limit ({max_pages})")
 
+        # Log completion
         logger.debug(
             f"Pagination complete: {len(all_tags)} tags across {page_count} pages"
         )
@@ -277,6 +352,111 @@ class OCIClient:
 
         return {"tags": filtered_tags}
 
+    def _build_curl_command(self, url: str, token: str) -> List[str]:
+        """Build curl command for fetching OCI registry data."""
+        return [
+            "curl",
+            "-s",  # Silent
+            "-i",  # Include headers in output
+            "--http2",  # Force HTTP/2 if available
+            "-H",
+            f"Authorization: Bearer {token}",
+            url,
+        ]
+
+    def _parse_http_response(
+        self, stdout: str
+    ) -> tuple[Optional[str], Optional[str], Optional[Dict[str, str]]]:
+        """
+        Parse HTTP response into status line, headers, and body.
+
+        Returns:
+            Tuple of (status_line, body, headers_dict) or (None, None, None) on error
+        """
+        # Split the response into HTTP status line, headers, and body
+        # First, find the index of the double newline that separates headers from body
+        double_crlf_pos = stdout.find("\r\n\r\n")
+        double_lf_pos = stdout.find("\n\n")
+
+        # Check which separator appears first and use it
+        if double_crlf_pos != -1 and (
+            double_lf_pos == -1 or double_crlf_pos < double_lf_pos
+        ):
+            # Use \r\n\r\n separator (4 characters)
+            double_newline_pos = double_crlf_pos
+            separator_len = 4
+        elif double_lf_pos != -1:
+            # Use \n\n separator (2 characters)
+            double_newline_pos = double_lf_pos
+            separator_len = 2
+        else:
+            logger.error("Could not find header/body separator in response")
+            logger.debug(f"Response content: {repr(stdout)}")
+            return None, None, None
+
+        # Extract headers part (from after status line to separator)
+        headers_and_status = stdout[:double_newline_pos]
+        body = stdout[double_newline_pos + separator_len :]  # Skip the separator
+
+        # The first line is the HTTP status line, subsequent lines are headers
+        lines = headers_and_status.splitlines()
+        if not lines:
+            logger.error("Empty response headers")
+            return None, None, None
+
+        # First line is status line, rest are headers
+        status_line = lines[0]
+        header_lines = lines[1:]
+
+        # Parse headers (case-insensitive)
+        headers: Dict[str, str] = {}
+        for line in header_lines:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                headers[key.strip().lower()] = value.strip()
+
+        return status_line, body, headers
+
+    def _handle_auth_error(
+        self, status_line: str, url: str, token: str
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Handle authentication errors by invalidating token and retrying."""
+        logger.debug(f"Received {status_line}, invalidating token and retrying...")
+        self.token_manager.invalidate_cache()
+        new_token = self.token_manager.get_token()
+        if new_token:
+            logger.debug("Got new token, retrying request...")
+            return self._fetch_page_with_headers(url, new_token)
+        else:
+            logger.error("Could not obtain new token after auth error")
+            return None, None
+
+    def _parse_response_body(self, body: str) -> Optional[Dict[str, Any]]:
+        """Parse JSON response body and handle errors."""
+        if not body.strip():
+            logger.debug(f"Empty response body")
+            return None
+
+        logger.debug(f"Response body: {repr(body)}")
+
+        # Check if the response is an error response from GHCR
+        # GHCR error responses follow the pattern: {"errors":[...]}
+        stripped_body = body.strip()
+        if stripped_body.startswith('{"errors":'):
+            logger.error(f"GHCR API returned an error: {stripped_body}")
+            # This is an error response, not the expected tags response
+            # The error suggests authentication/token issue
+            return None
+
+        try:
+            data = json.loads(body)
+            logger.debug(f"Fetched {len(data.get('tags', []))} tags")
+            return data
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in response: {e}")
+            logger.debug(f"Response body that failed to parse: {repr(body)}")
+            return None
+
     def _fetch_page_with_headers(
         self, url: str, token: str
     ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -286,138 +466,97 @@ class OCIClient:
         Returns:
             Tuple of (page_data, next_url)
         """
-        # Initialize variables to help with type checking
-        stdout: str = ""
-        body: str = ""
-
         try:
-            cmd = [
-                "curl",
-                "-s",  # Silent
-                "-i",  # Include headers in output
-                "--http2",  # Force HTTP/2 if available
-                "-H",
-                f"Authorization: Bearer {token}",
-                url,
-            ]
+            cmd = self._build_curl_command(url, token)
+            result = self._execute_curl_command(cmd)
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
+            parse_result = self._parse_http_response(result.stdout)
+            if not self._validate_parse_result(parse_result):
+                return None, None
+
+            status_line, body, headers = parse_result  # type: ignore[assignment]
+
+            if status_line:
+                self._log_http_status(status_line)
+
+            auth_error_result = (
+                self._check_auth_error(status_line, url, token) if status_line else None
             )
+            if auth_error_result is not None:
+                return auth_error_result
 
-            # Properly parse the HTTP response which has format:
-            # HTTP/1.1 XXX Status
-            # Headers...
-            #
-            # Body
-            stdout = result.stdout
+            next_url = self._extract_next_url(headers)
+            data = self._parse_response_body(body) if body else None
 
-            # Split the response into HTTP status line, headers, and body
-            # First, find the index of the double newline that separates headers from body
-            double_crlf_pos = stdout.find("\r\n\r\n")
-            double_lf_pos = stdout.find("\n\n")
-
-            # Check which separator appears first and use it
-            if double_crlf_pos != -1 and (
-                double_lf_pos == -1 or double_crlf_pos < double_lf_pos
-            ):
-                # Use \r\n\r\n separator (4 characters)
-                double_newline_pos = double_crlf_pos
-                separator_len = 4
-            elif double_lf_pos != -1:
-                # Use \n\n separator (2 characters)
-                double_newline_pos = double_lf_pos
-                separator_len = 2
-            else:
-                logger.error("Could not find header/body separator in response")
-                logger.debug(f"Response content: {repr(stdout)}")
+            if data is None:
                 return None, None
 
-            # Extract headers part (from after status line to separator)
-            headers_and_status = stdout[:double_newline_pos]
-            body = stdout[double_newline_pos + separator_len :]  # Skip the separator
-
-            # The first line is the HTTP status line, subsequent lines are headers
-            lines = headers_and_status.splitlines()
-            if not lines:
-                logger.error("Empty response headers")
-                return None, None
-
-            # First line is status line, rest are headers
-            status_line = lines[0]
-            header_lines = lines[1:]
-
-            # Parse headers (case-insensitive)
-            headers: Dict[str, str] = {}
-            for line in header_lines:
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    headers[key.strip().lower()] = value.strip()
-
-            # Log status line for debugging
-            logger.debug(f"HTTP Status: {status_line}")
-
-            # Check if status indicates an auth error, and if so, try with fresh token
-            if "401" in status_line or "403" in status_line:
-                logger.debug(
-                    f"Received {status_line}, invalidating token and retrying..."
-                )
-                self.token_manager.invalidate_cache()
-                new_token = self.token_manager.get_token()
-                if new_token:
-                    logger.debug("Got new token, retrying request...")
-                    return self._fetch_page_with_headers(url, new_token)
-                else:
-                    logger.error("Could not obtain new token after auth error")
-                    return None, None
-
-            # Get Link header
-            link_header = headers.get("link")
-            next_url = (
-                self.token_manager.parse_link_header(link_header)
-                if link_header
-                else None
-            )
-
-            # Parse JSON body
-            if not body.strip():
-                logger.debug(f"Empty response body. Full response: {repr(stdout)}")
-                return None, None
-
-            logger.debug(f"Response body: {repr(body)}")
-
-            # Check if the response is an error response from GHCR
-            # GHCR error responses follow the pattern: {"errors":[...]}
-            stripped_body = body.strip()
-            if stripped_body.startswith('{"errors":'):
-                logger.error(f"GHCR API returned an error: {stripped_body}")
-                # This is an error response, not the expected tags response
-                # The error suggests authentication/token issue
-                return None, None
-
-            data = json.loads(body)
-
-            logger.debug(
-                f"Fetched {len(data.get('tags', []))} tags, has_next: {next_url is not None}"
-            )
+            self._log_pagination_status(next_url)
 
             return data, next_url
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Timeout fetching page: {url}")
-            return None, None
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in response: {e}")
-            logger.debug(f"Response body that failed to parse: {repr(body)}")
-            logger.debug(f"Full response that failed to parse: {repr(stdout)}")
-            return None, None
+            return self._handle_fetch_timeout(url)
         except Exception as e:
-            logger.error(f"Error fetching page: {e}")
-            return None, None
+            return self._handle_fetch_error(e)
+
+    def _execute_curl_command(self, cmd: List[str]) -> subprocess.CompletedProcess[str]:
+        """Execute curl command and return result."""
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+
+    def _validate_parse_result(
+        self,
+        parse_result: Tuple[Optional[str], Optional[str], Optional[Dict[str, str]]],
+    ) -> bool:
+        """Validate that parse result contains all required components."""
+        return (
+            parse_result[0] is not None
+            and parse_result[1] is not None
+            and parse_result[2] is not None
+        )
+
+    def _log_http_status(self, status_line: str) -> None:
+        """Log HTTP status for debugging."""
+        logger.debug(f"HTTP Status: {status_line}")
+
+    def _check_auth_error(
+        self, status_line: str, url: str, token: str
+    ) -> Optional[tuple[Optional[Dict[str, Any]], Optional[str]]]:
+        """Check for auth errors and handle them."""
+        if status_line and ("401" in status_line or "403" in status_line):
+            return self._handle_auth_error(status_line, url, token)
+        return None
+
+    def _extract_next_url(self, headers: Optional[Dict[str, str]]) -> Optional[str]:
+        """Extract next URL from Link header."""
+        link_header = headers.get("link") if headers else None
+        return (
+            self.token_manager.parse_link_header(link_header) if link_header else None
+        )
+
+    def _log_pagination_status(self, next_url: Optional[str]) -> None:
+        """Log pagination status."""
+        logger.debug(f"Fetched tags, has_next: {next_url is not None}")
+
+    def _handle_fetch_timeout(
+        self, url: str
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Handle fetch timeout."""
+        logger.error(f"Timeout fetching page: {url}")
+        return None, None
+
+    def _handle_fetch_error(
+        self, e: Exception
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Handle general fetch errors."""
+        logger.error(f"Error fetching page: {e}")
+        return None, None
 
     def _parse_link_header(self, link_header: Optional[str]) -> Optional[str]:
         """

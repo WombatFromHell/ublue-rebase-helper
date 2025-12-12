@@ -4,7 +4,6 @@ Tests for command submenu functionality to improve coverage in commands.py modul
 
 from unittest.mock import Mock
 
-
 from src.urh.commands import CommandRegistry
 from src.urh.menu import MenuExitException
 
