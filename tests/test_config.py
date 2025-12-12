@@ -1,13 +1,100 @@
 """Tests for the config module."""
 
 import os
+import re
 import tempfile
 from pathlib import Path
 
 import pytest
 from pytest_mock import MockFixture
 
-from src.urh.config import ConfigManager, URHConfig
+from src.urh.config import (
+    ConfigManager,
+    RepositoryConfig,
+    SettingsConfig,
+    URHConfig,
+)
+
+
+class TestRepositoryConfigValidation:
+    """Test RepositoryConfig validation."""
+
+    def test_valid_repository_config(self):
+        """Test valid repository configuration."""
+        config = RepositoryConfig(
+            include_sha256_tags=True,
+            filter_patterns=[r"^test.*$"],
+            ignore_tags=["latest"],
+            transform_patterns=[{"pattern": r"^latest\.(.*)$", "replacement": r"\1"}],
+            latest_dot_handling="transform_dates_only",
+        )
+        assert config.include_sha256_tags is True
+        assert config.filter_patterns == [r"^test.*$"]
+        assert config.ignore_tags == ["latest"]
+        assert config.transform_patterns == [
+            {"pattern": r"^latest\.(.*)$", "replacement": r"\1"}
+        ]
+        assert config.latest_dot_handling == "transform_dates_only"
+
+    def test_invalid_regex_pattern(self):
+        """Test invalid regex pattern validation."""
+        with pytest.raises(ValueError, match="Invalid regex pattern"):
+            RepositoryConfig(filter_patterns=[r"[invalid(regex"])
+
+    def test_invalid_transform_pattern_missing_keys(self):
+        """Test transform pattern with missing keys."""
+        with pytest.raises(
+            ValueError, match="must have 'pattern' and 'replacement' keys"
+        ):
+            RepositoryConfig(
+                transform_patterns=[{"pattern": "test"}]
+            )  # Missing replacement
+
+        with pytest.raises(
+            ValueError, match="must have 'pattern' and 'replacement' keys"
+        ):
+            RepositoryConfig(
+                transform_patterns=[{"replacement": "test"}]
+            )  # Missing pattern
+
+    def test_invalid_transform_pattern_regex(self):
+        """Test transform pattern with invalid regex."""
+        with pytest.raises(ValueError, match="Invalid regex in transform pattern"):
+            RepositoryConfig(
+                transform_patterns=[
+                    {"pattern": r"[invalid(regex", "replacement": "test"}
+                ]
+            )
+
+    def test_invalid_latest_dot_handling(self):
+        """Test invalid latest_dot_handling value."""
+        with pytest.raises(ValueError, match="latest_dot_handling must be one of"):
+            RepositoryConfig(latest_dot_handling="invalid_value")
+
+
+class TestSettingsConfigValidation:
+    """Test SettingsConfig validation."""
+
+    def test_valid_settings_config(self):
+        """Test valid settings configuration."""
+        config = SettingsConfig(max_tags_display=50, debug_mode=True)
+        assert config.max_tags_display == 50
+        assert config.debug_mode is True
+
+    def test_invalid_max_tags_display_negative(self):
+        """Test negative max_tags_display validation."""
+        with pytest.raises(ValueError, match="max_tags_display must be positive"):
+            SettingsConfig(max_tags_display=-1)
+
+    def test_invalid_max_tags_display_zero(self):
+        """Test zero max_tags_display validation."""
+        with pytest.raises(ValueError, match="max_tags_display must be positive"):
+            SettingsConfig(max_tags_display=0)
+
+    def test_invalid_max_tags_display_too_large(self):
+        """Test max_tags_display too large validation."""
+        with pytest.raises(ValueError, match="max_tags_display too large"):
+            SettingsConfig(max_tags_display=1001)
 
 
 class TestConfigManager:
@@ -50,6 +137,72 @@ class TestConfigManager:
 
         # Should use defaults when invalid types are provided
         assert config.container_urls.default != 123  # Should use default
+        assert config.settings.max_tags_display != 0  # Should use default
+        assert config.settings.debug_mode is False  # Should use default
+
+    def test_parse_config_repository_missing_name(self):
+        """Test parsing repository config with missing name field."""
+        config_manager = ConfigManager()
+        data = {
+            "repository": [
+                {
+                    # Missing 'name' field
+                    "include_sha256_tags": True,
+                    "filter_patterns": ["pattern1"],
+                }
+            ]
+        }
+        config = config_manager._parse_config(data)
+
+        # Should skip repositories without name
+        assert len(config.repositories) == 0
+
+    def test_parse_config_repository_invalid_types(self):
+        """Test parsing repository config with invalid data types."""
+        config_manager = ConfigManager()
+        data = {
+            "repository": [
+                {
+                    "name": "test/repo",
+                    "include_sha256_tags": "not_a_bool",  # Invalid type
+                    "filter_patterns": 123,  # Invalid type - will cause TypeError
+                    "ignore_tags": 456,  # Invalid type - will cause TypeError
+                    "transform_patterns": "not_a_list",  # Invalid type
+                    "latest_dot_handling": 789,  # Invalid type
+                }
+            ]
+        }
+        # This should raise TypeError due to non-iterable filter_patterns
+        with pytest.raises(TypeError):
+            config_manager._parse_config(data)
+
+    def test_parse_config_container_urls_invalid_types(self):
+        """Test parsing container URLs with invalid data types."""
+        config_manager = ConfigManager()
+        data = {
+            "container_urls": {
+                "default": ["not_a_string"],  # Invalid type
+                "options": {"not": "a_list"},  # Invalid type
+            }
+        }
+        config = config_manager._parse_config(data)
+
+        # Should use defaults when invalid types are provided
+        assert config.container_urls.default != "not_a_string"  # Should use default
+        assert config.container_urls.options != ["not", "a_list"]  # Should use default
+
+    def test_parse_config_settings_invalid_types(self):
+        """Test parsing settings with invalid data types."""
+        config_manager = ConfigManager()
+        data = {
+            "settings": {
+                "max_tags_display": "not_an_int",  # Invalid type
+                "debug_mode": "not_a_bool",  # Invalid type
+            }
+        }
+        config = config_manager._parse_config(data)
+
+        # Should use defaults when invalid types are provided
         assert config.settings.max_tags_display != 0  # Should use default
         assert config.settings.debug_mode is False  # Should use default
 
@@ -139,6 +292,52 @@ class TestConfigManager:
         assert result == mock_config
         mock_get_default.assert_called_once()
 
+    def test_load_config_file_error(self, mocker):
+        """Test loading config with file reading error."""
+        mock_config_path = mocker.MagicMock()
+        mock_config_path.exists.return_value = True
+
+        config_manager = ConfigManager()
+        config_manager.get_config_path = mocker.MagicMock(return_value=mock_config_path)
+
+        # Simulate file reading error
+        mocker.patch("builtins.open", side_effect=IOError("File error"))
+
+        mock_get_default = mocker.patch.object(URHConfig, "get_default")
+        mock_config = mocker.MagicMock()
+        mock_get_default.return_value = mock_config
+
+        result = config_manager.load_config()
+
+        assert result == mock_config
+        mock_get_default.assert_called_once()
+
+    def test_load_config_caching(self, mocker):
+        """Test config caching behavior."""
+        mock_config_path = mocker.MagicMock()
+        mock_config_path.exists.return_value = True
+
+        config_manager = ConfigManager()
+        config_manager.get_config_path = mocker.MagicMock(return_value=mock_config_path)
+
+        # Mock the file reading and parsing
+        mocker.patch("builtins.open", mocker.mock_open(read_data='{"test": "value"}'))
+        mocker.patch("tomllib.load", return_value={"test": "value"})
+
+        mock_parse = mocker.patch.object(config_manager, "_parse_config")
+        mock_config = mocker.MagicMock()
+        mock_parse.return_value = mock_config
+
+        # First call should parse the config
+        result1 = config_manager.load_config()
+        assert result1 == mock_config
+        mock_parse.assert_called_once()
+
+        # Second call should return cached config without parsing again
+        result2 = config_manager.load_config()
+        assert result2 == mock_config
+        mock_parse.assert_called_once()  # Should still be called only once
+
     def test_parse_config(self):
         """Test parsing configuration data."""
         data = {
@@ -189,6 +388,94 @@ class TestConfigManager:
         assert config.settings.max_tags_display == 50
         assert config.settings.debug_mode is True
 
+    def test_parse_config_edge_cases(self):
+        """Test parsing config with edge cases."""
+        config_manager = ConfigManager()
+
+        # Test empty config
+        data = {}
+        config = config_manager._parse_config(data)
+        assert config.repositories == {}
+        assert config.container_urls.default is not None  # Should use defaults
+        assert config.settings.max_tags_display is not None  # Should use defaults
+
+        # Test config with empty repository list
+        data = {"repository": []}
+        config = config_manager._parse_config(data)
+        assert config.repositories == {}
+
+        # Test config with empty container URLs
+        data = {"container_urls": {}}
+        config = config_manager._parse_config(data)
+        assert config.container_urls.default is not None  # Should use defaults
+        assert config.container_urls.options is not None  # Should use defaults
+
+        # Test config with empty settings
+        data = {"settings": {}}
+        config = config_manager._parse_config(data)
+        assert config.settings.max_tags_display is not None  # Should use defaults
+        assert config.settings.debug_mode is not None  # Should use defaults
+
+    def test_parse_config_transform_patterns_edge_cases(self):
+        """Test parsing transform patterns with edge cases."""
+        config_manager = ConfigManager()
+
+        # Test transform patterns with non-string values
+        data = {
+            "repository": [
+                {
+                    "name": "test/repo",
+                    "transform_patterns": [
+                        {"pattern": 123, "replacement": "test"},  # Invalid pattern type
+                        {
+                            "pattern": "test",
+                            "replacement": 456,
+                        },  # Invalid replacement type
+                        {"pattern": "valid", "replacement": "valid"},  # Valid
+                    ],
+                }
+            ]
+        }
+        config = config_manager._parse_config(data)
+
+        repo_config = config.repositories["test/repo"]
+        # Should only include valid transform patterns
+        assert len(repo_config.transform_patterns) == 1
+        assert repo_config.transform_patterns[0] == {
+            "pattern": "valid",
+            "replacement": "valid",
+        }
+
+    def test_parse_config_mixed_valid_invalid_data(self):
+        """Test parsing config with mixed valid and invalid data."""
+        config_manager = ConfigManager()
+
+        data = {
+            "repository": [
+                {
+                    "name": "valid/repo",
+                    "include_sha256_tags": True,
+                    "filter_patterns": ["valid_pattern"],
+                },
+                {
+                    "name": "invalid/repo",
+                    "include_sha256_tags": "invalid",  # Invalid type
+                    "filter_patterns": 123,  # Invalid type - will cause TypeError
+                },
+            ],
+            "container_urls": {
+                "default": "valid/default",
+                "options": ["valid/option"],
+            },
+            "settings": {
+                "max_tags_display": 50,
+                "debug_mode": True,
+            },
+        }
+        # This should raise TypeError due to non-iterable filter_patterns
+        with pytest.raises(TypeError):
+            config_manager._parse_config(data)
+
     @pytest.mark.parametrize(
         "value,expected",
         [
@@ -206,6 +493,67 @@ class TestConfigManager:
         """Test serializing values to TOML format."""
         config_manager = ConfigManager()
         assert config_manager._serialize_value(value) == expected
+
+    def test_serialize_value_complex_nested_structures(self):
+        """Test serializing complex nested structures."""
+        config_manager = ConfigManager()
+
+        # Test nested dictionaries (inline tables)
+        complex_dict = {
+            "pattern": r"^latest\.(.*)$",
+            "replacement": r"\1",
+        }
+        result = config_manager._serialize_value(complex_dict)
+        assert 'pattern = "^latest\\\\.(.*)$"' in result
+        assert 'replacement = "\\\\1"' in result
+
+        # Test list with nested dictionaries
+        complex_list = [
+            {"pattern": r"^test.*$", "replacement": "test"},
+            {"pattern": r"^prod.*$", "replacement": "prod"},
+        ]
+        result = config_manager._serialize_value(complex_list)
+        assert 'pattern = "^test.*$"' in result
+        assert 'replacement = "test"' in result
+        assert 'pattern = "^prod.*$"' in result
+        assert 'replacement = "prod"' in result
+
+        # Test empty dict
+        result = config_manager._serialize_value({})
+        assert result == ""
+
+        # Test list with mixed types
+        mixed_list = ["string", 42, True, {"key": "value"}]
+        result = config_manager._serialize_value(mixed_list)
+        assert '"string"' in result
+        assert "42" in result
+        assert "true" in result
+        assert 'key = "value"' in result
+
+    def test_serialize_value_edge_cases(self):
+        """Test serializing edge cases."""
+        config_manager = ConfigManager()
+
+        # Test empty list
+        result = config_manager._serialize_value([])
+        assert result == "[]"
+
+        # Test None value
+        result = config_manager._serialize_value(None)
+        assert result == "None"
+
+        # Test complex string with special characters
+        test_string = "test\nwith\tnewlines\rand\ttabs"
+        result = config_manager._serialize_value(test_string)
+        # The actual result will contain the literal characters, not escape sequences
+        assert result.startswith('"') and result.endswith('"')
+        assert len(result) > 2  # Should have quotes around it
+
+        # Test boolean values
+        result = config_manager._serialize_value(True)
+        assert result == "true"
+        result = config_manager._serialize_value(False)
+        assert result == "false"
 
     def test_create_default_config(self, mocker):
         """Test creating default configuration file."""

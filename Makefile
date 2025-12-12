@@ -26,7 +26,23 @@ install: $(OUT)
 	echo "Installed to $$INSTALL_DIR/urh.pyz"
 
 test:
-	uv run pytest -v --cov=src --cov-report=term-missing
+	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch
+
+lint:
+	ruff check ./src ./tests; \
+		pyright ./src ./tests
+
+prettier:
+	prettier --cache -c -w *.md
+
+format: prettier
+	ruff check --select I ./src ./tests --fix; \
+	ruff format ./src ./tests
+
+quality: lint format
+
+radon:
+	uv run radon cc ./src/urh/ -a
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
@@ -39,4 +55,4 @@ clean:
 
 all: clean build install
 
-.PHONY: all clean install
+.PHONY: all clean install build test lint format radon

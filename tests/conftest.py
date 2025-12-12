@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -1191,3 +1192,233 @@ def command_handler_scenario(request, mocker):
 def url_extraction_scenarios(request):
     """Parametrized scenarios for URL extraction tests."""
     return request.param
+
+
+# ============================================================================
+# COMPOSITE FIXTURES FOR ADVANCED TEST OPTIMIZATION
+# ============================================================================
+
+
+@pytest.fixture
+def common_system_mocks(mocker):
+    """Composite fixture for common system-level mocks."""
+    return {
+        "check_curl_presence": mocker.patch(
+            "src.urh.system.check_curl_presence", return_value=True
+        ),
+        "run_command": mocker.patch("src.urh.commands._run_command", return_value=0),
+        "sys_exit": mocker.patch("sys.exit"),
+        "subprocess_run": mocker.patch(
+            "subprocess.run", return_value=MagicMock(returncode=0)
+        ),
+    }
+
+
+@pytest.fixture
+def deployment_test_scenario(mocker, sample_deployment_info):
+    """Complete deployment testing scenario with all necessary mocks."""
+    mocks = {
+        "get_deployment_info": mocker.patch(
+            "src.urh.deployment.get_deployment_info",
+            return_value=sample_deployment_info,
+        ),
+        "get_current_deployment_info": mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "bazzite-nix", "version": "42.20231115.0"},
+        ),
+        "format_deployment_header": mocker.patch(
+            "src.urh.deployment.format_deployment_header",
+            return_value="Current deployment: bazzite-nix (42.20231115.0)",
+        ),
+        "get_status_output": mocker.patch(
+            "src.urh.deployment.get_status_output", return_value=SAMPLE_STATUS_OUTPUT
+        ),
+    }
+    return mocks
+
+
+@pytest.fixture
+def command_test_setup(mocker, sample_config):
+    """Composite fixture for command testing with common setup."""
+    mock_get_config = mocker.patch(
+        "src.urh.config.get_config", return_value=sample_config
+    )
+    mock_get_deployment_info = mocker.patch(
+        "src.urh.deployment.get_deployment_info", return_value=sample_deployment_info
+    )
+    mock_check_curl = mocker.patch(
+        "src.urh.system.check_curl_presence", return_value=True
+    )
+    mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
+
+    return {
+        "config": mock_get_config,
+        "deployment": mock_get_deployment_info,
+        "system": mock_check_curl,
+        "execution": mock_run_command,
+    }
+
+
+@pytest.fixture
+def menu_system_test_setup(mocker, sample_menu_items):
+    """Composite fixture for menu system testing."""
+    mock_is_tty = mocker.patch("os.isatty", return_value=True)
+    mock_menu_system = mocker.patch("src.urh.menu.MenuSystem")
+    mock_menu_system.show_menu.return_value = "1"
+    mocker.patch.dict(os.environ, {"URH_AVOID_GUM": "1"})
+
+    return {
+        "tty": mock_is_tty,
+        "menu": mock_menu_system,
+        "items": sample_menu_items,
+    }
+
+
+@pytest.fixture
+def oci_client_test_setup(mocker, SAMPLE_TAGS_DATA):
+    """Composite fixture for OCI client testing."""
+    mock_client = mocker.patch("src.urh.oci_client.OCIClient")
+    mock_instance = MagicMock()
+    mock_instance.get_all_tags.return_value = SAMPLE_TAGS_DATA
+    mock_instance.fetch_repository_tags.return_value = {"tags": ["tag1", "tag2"]}
+    mock_client.return_value = mock_instance
+
+    mock_token_manager = mocker.patch("src.urh.token_manager.OCITokenManager")
+    mock_token_instance = MagicMock()
+    mock_token_instance.get_token.return_value = "test_token"
+    mock_token_manager.return_value = mock_token_instance
+
+    mock_urlopen = mocker.patch("urllib.request.urlopen")
+    mock_response = MagicMock()
+    mock_response.read.return_value.decode.return_value = json.dumps(
+        {"token": "test_token"}
+    )
+    mock_urlopen.return_value = mock_response
+
+    return {
+        "client": mock_client,
+        "token_manager": mock_token_manager,
+        "urlopen": mock_urlopen,
+        "instance": mock_instance,
+    }
+
+
+@pytest.fixture
+def integration_test_setup(mocker):
+    """Composite fixture for integration testing scenarios."""
+    mock_config = mocker.patch("src.urh.config.get_config")
+    mock_deployment = mocker.patch("src.urh.deployment.get_deployment_info")
+    mock_system = mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+    mock_menu = mocker.patch("src.urh.menu.MenuSystem")
+    mock_commands = mocker.patch("src.urh.commands._run_command", return_value=0)
+
+    mock_config.return_value = URHConfig.get_default()
+    mock_deployment.return_value = parse_deployment_info(SAMPLE_STATUS_OUTPUT)
+    mock_menu.show_menu.return_value = "1"
+
+    return {
+        "config": mock_config,
+        "deployment": mock_deployment,
+        "system": mock_system,
+        "menu": mock_menu,
+        "commands": mock_commands,
+    }
+
+
+# ============================================================================
+# PERFORMANCE OPTIMIZATION FIXTURES
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def session_urh_config():
+    """Session-scoped URHConfig instance."""
+    return URHConfig.get_default()
+
+
+@pytest.fixture(scope="session")
+def session_command_registry():
+    """Session-scoped CommandRegistry instance."""
+    return CommandRegistry()
+
+
+@pytest.fixture(scope="session")
+def session_sample_data():
+    """Session-scoped sample data for performance."""
+    return {
+        "status_output": SAMPLE_STATUS_OUTPUT,
+        "status_output_with_pinned": SAMPLE_STATUS_OUTPUT_WITH_PINNED,
+        "tags_data": SAMPLE_TAGS_DATA,
+        "config_data": SAMPLE_CONFIG_DATA,
+    }
+
+
+# ============================================================================
+# ERROR SCENARIO FIXTURES
+# ============================================================================
+
+
+@pytest.fixture
+def error_scenario_fixture(mocker):
+    """Fixture for testing error scenarios with different error types."""
+
+    def create_error_scenario(error_type="timeout"):
+        if error_type == "timeout":
+            import subprocess
+
+            return mocker.patch(
+                "src.urh.commands._run_command",
+                side_effect=subprocess.TimeoutExpired("cmd", 30),
+            )
+        elif error_type == "not_found":
+            return mocker.patch(
+                "src.urh.commands._run_command", side_effect=FileNotFoundError
+            )
+        elif error_type == "permission":
+            return mocker.patch(
+                "src.urh.commands._run_command", side_effect=PermissionError
+            )
+        elif error_type == "network":
+            import urllib.error
+
+            return mocker.patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("Network error"),
+            )
+        else:
+            import subprocess
+
+            return mocker.patch(
+                "src.urh.commands._run_command",
+                side_effect=subprocess.TimeoutExpired("cmd", 30),
+            )
+
+    return create_error_scenario
+
+
+# ============================================================================
+# PARAMETRIZED SCENARIO FIXTURES
+# ============================================================================
+
+
+@pytest.fixture(
+    params=[
+        {"scenario": "success", "returncode": 0},
+        {"scenario": "failure", "returncode": 1},
+        {"scenario": "timeout", "exception": subprocess.TimeoutExpired},
+        {"scenario": "not_found", "exception": FileNotFoundError},
+    ]
+)
+def command_execution_scenarios(request, mocker):
+    """Parametrized command execution scenarios."""
+    scenario = request.param
+    if "exception" in scenario:
+        mock_run = mocker.patch(
+            "src.urh.commands._run_command",
+            side_effect=scenario["exception"]("cmd", 30),
+        )
+    else:
+        mock_run = mocker.patch(
+            "src.urh.commands._run_command", return_value=scenario["returncode"]
+        )
+    return {"run_command": mock_run, "scenario": scenario["scenario"]}

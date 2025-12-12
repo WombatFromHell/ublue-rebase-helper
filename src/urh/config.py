@@ -226,162 +226,227 @@ class ConfigManager:
 
     def _parse_config(self, data: Dict[str, Any]) -> URHConfig:
         """Parse configuration data from TOML."""
-        from typing import cast
-
         config = URHConfig()
 
-        # Parse repositories (now as array of tables)
+        # Parse repositories
         if "repository" in data:
-            repositories_list = cast(List[Dict[str, Any]], data["repository"])
-            for repo_data in repositories_list:
-                # Get the repository name from the 'name' field
-                repo_name = repo_data.get("name")
-                if not repo_name:
-                    continue
-
-                # Extract with explicit type annotations and validation
-                include_sha256_tags: bool = repo_data.get("include_sha256_tags", False)
-
-                # Type-safe extraction of list fields
-                filter_patterns_raw = repo_data.get("filter_patterns", [])
-                filter_patterns: List[str] = [
-                    p
-                    for p in cast(List[Any], filter_patterns_raw)
-                    if isinstance(p, str)
-                ]
-
-                ignore_tags_raw = repo_data.get("ignore_tags", [])
-                ignore_tags: List[str] = [
-                    t for t in cast(List[Any], ignore_tags_raw) if isinstance(t, str)
-                ]
-
-                transform_patterns_raw = repo_data.get("transform_patterns", [])
-                transform_patterns: List[Dict[str, str]] = []
-                for item in cast(List[Any], transform_patterns_raw):
-                    if isinstance(item, dict):
-                        item_dict = cast(Dict[str, Any], item)
-                        # Ensure both 'pattern' and 'replacement' exist and are strings
-                        pattern = item_dict.get("pattern")
-                        replacement = item_dict.get("replacement")
-                        if isinstance(pattern, str) and isinstance(replacement, str):
-                            transform_patterns.append(
-                                {"pattern": pattern, "replacement": replacement}
-                            )
-
-                latest_dot_handling_raw = repo_data.get("latest_dot_handling")
-                latest_dot_handling: Optional[str] = (
-                    latest_dot_handling_raw
-                    if isinstance(latest_dot_handling_raw, str)
-                    else None
-                )
-
-                repo_config = RepositoryConfig(
-                    include_sha256_tags=include_sha256_tags,
-                    filter_patterns=filter_patterns,
-                    ignore_tags=ignore_tags,
-                    transform_patterns=transform_patterns,
-                    latest_dot_handling=latest_dot_handling,
-                )
-                config.repositories[repo_name] = repo_config
+            self._parse_repositories(data["repository"], config)
 
         # Parse container URLs
         if "container_urls" in data:
-            urls_data = cast(Dict[str, Any], data["container_urls"])
-
-            default_raw = urls_data.get("default", config.container_urls.default)
-            default: str = (
-                default_raw
-                if isinstance(default_raw, str)
-                else config.container_urls.default
-            )
-
-            options_raw = urls_data.get("options", config.container_urls.options)
-            options: List[str] = [
-                o for o in cast(List[Any], options_raw) if isinstance(o, str)
-            ]
-
-            config.container_urls = ContainerURLsConfig(
-                default=default,
-                options=options,
-            )
+            self._parse_container_urls(data["container_urls"], config)
 
         # Parse settings
         if "settings" in data:
-            settings_data = cast(Dict[str, Any], data["settings"])
-
-            max_tags_display_raw = settings_data.get(
-                "max_tags_display", MAX_TAGS_DISPLAY
-            )
-            max_tags_display: int = (
-                max_tags_display_raw
-                if isinstance(max_tags_display_raw, int)
-                else MAX_TAGS_DISPLAY
-            )
-
-            debug_mode_raw = settings_data.get("debug_mode", False)
-            debug_mode: bool = (
-                debug_mode_raw if isinstance(debug_mode_raw, bool) else False
-            )
-
-            config.settings = SettingsConfig(
-                max_tags_display=max_tags_display,
-                debug_mode=debug_mode,
-            )
+            self._parse_settings(data["settings"], config)
 
         return config
 
+    def _parse_repositories(
+        self, repositories_list: List[Dict[str, Any]], config: URHConfig
+    ) -> None:
+        """Parse repository configurations."""
+        from typing import cast
+
+        for repo_data in repositories_list:
+            repo_name = repo_data.get("name")
+            if not repo_name:
+                continue
+
+            repo_config = self._create_repository_config(repo_data)
+            config.repositories[repo_name] = repo_config
+
+    def _create_repository_config(self, repo_data: Dict[str, Any]) -> RepositoryConfig:
+        """Create a RepositoryConfig from parsed data."""
+        from typing import cast
+
+        include_sha256_tags = repo_data.get("include_sha256_tags", False)
+        filter_patterns = self._extract_string_list(repo_data, "filter_patterns")
+        ignore_tags = self._extract_string_list(repo_data, "ignore_tags")
+        transform_patterns = self._extract_transform_patterns(repo_data)
+        latest_dot_handling = self._extract_optional_string(
+            repo_data, "latest_dot_handling"
+        )
+
+        return RepositoryConfig(
+            include_sha256_tags=include_sha256_tags,
+            filter_patterns=filter_patterns,
+            ignore_tags=ignore_tags,
+            transform_patterns=transform_patterns,
+            latest_dot_handling=latest_dot_handling,
+        )
+
+    def _extract_string_list(self, data: Dict[str, Any], key: str) -> List[str]:
+        """Extract and validate a list of strings from configuration data."""
+        from typing import cast
+
+        raw_list = data.get(key, [])
+        return [item for item in cast(List[Any], raw_list) if isinstance(item, str)]
+
+    def _extract_transform_patterns(self, data: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Extract and validate transform patterns from configuration data."""
+        from typing import cast
+
+        patterns: List[Dict[str, str]] = []
+        raw_patterns = data.get("transform_patterns", [])
+
+        for item in cast(List[Any], raw_patterns):
+            if isinstance(item, dict):
+                item_dict = cast(Dict[str, Any], item)
+                pattern = item_dict.get("pattern")
+                replacement = item_dict.get("replacement")
+                if isinstance(pattern, str) and isinstance(replacement, str):
+                    patterns.append({"pattern": pattern, "replacement": replacement})
+
+        return patterns
+
+    def _extract_optional_string(self, data: Dict[str, Any], key: str) -> Optional[str]:
+        """Extract an optional string value from configuration data."""
+        value = data.get(key)
+        return value if isinstance(value, str) else None
+
+    def _parse_container_urls(
+        self, urls_data: Dict[str, Any], config: URHConfig
+    ) -> None:
+        """Parse container URL configurations."""
+        from typing import cast
+
+        default = self._extract_string_with_default(
+            urls_data, "default", config.container_urls.default
+        )
+        options = self._extract_string_list(urls_data, "options")
+
+        config.container_urls = ContainerURLsConfig(
+            default=default,
+            options=options,
+        )
+
+    def _extract_string_with_default(
+        self, data: Dict[str, Any], key: str, default_value: str
+    ) -> str:
+        """Extract a string value with a default fallback."""
+        value = data.get(key, default_value)
+        return value if isinstance(value, str) else default_value
+
+    def _parse_settings(self, settings_data: Dict[str, Any], config: URHConfig) -> None:
+        """Parse settings configurations."""
+        max_tags_display = self._extract_int_with_default(
+            settings_data, "max_tags_display", MAX_TAGS_DISPLAY
+        )
+        debug_mode = self._extract_bool_with_default(settings_data, "debug_mode", False)
+
+        config.settings = SettingsConfig(
+            max_tags_display=max_tags_display,
+            debug_mode=debug_mode,
+        )
+
+    def _extract_int_with_default(
+        self, data: Dict[str, Any], key: str, default_value: int
+    ) -> int:
+        """Extract an integer value with a default fallback."""
+        value = data.get(key, default_value)
+        return value if isinstance(value, int) else default_value
+
+    def _extract_bool_with_default(
+        self, data: Dict[str, Any], key: str, default_value: bool
+    ) -> bool:
+        """Extract a boolean value with a default fallback."""
+        value = data.get(key, default_value)
+        return value if isinstance(value, bool) else default_value
+
     def _serialize_value(self, value: Any, indent: int = 0) -> str:
         """Serialize a value to TOML format with proper escaping using pattern matching."""
-        indent_str = "    " * indent
         match value:
             case bool():
-                return str(value).lower()
+                return self._serialize_boolean(value)
             case int():
-                return str(value)
+                return self._serialize_integer(value)
             case str():
-                # Escape backslashes for TOML
-                return f'"{value.replace("\\", "\\\\")}"'
+                return self._serialize_string(value)
             case []:
-                return "[]"
+                return self._serialize_empty_list()
             case _ if isinstance(value, list):
-                items = cast(List[Any], value)
-                if not items:
-                    return "[]"
-                serialized_items: List[str] = []
-                for item in items:
-                    if isinstance(item, str):
-                        # Escape backslashes for TOML
-                        serialized_items.append(
-                            f'{indent_str}    "{item.replace("\\", "\\\\")}"'
-                        )
-                    elif isinstance(item, dict):
-                        # Handle inline tables
-                        table_items: List[str] = []
-                        item_dict = cast(Dict[str, Any], item)
-                        for k, v in item_dict.items():
-                            if isinstance(v, str):
-                                table_items.append(f'{k} = "{v.replace("\\", "\\\\")}"')
-                            else:
-                                table_items.append(
-                                    f"{k} = {self._serialize_value(v, 0)}"
-                                )
-                        serialized_items.append(
-                            f"{indent_str}    {{ {', '.join(table_items)} }}"
-                        )
-                    else:
-                        serialized_items.append(
-                            f"{indent_str}    {self._serialize_value(item, 0)}"
-                        )
-                return "[\n" + ",\n".join(serialized_items) + "\n" + indent_str + "]"
+                return self._serialize_list(cast(List[Any], value), indent)
             case _ if isinstance(value, dict):
-                d = cast(Dict[str, Any], value)
-                # Handle regular tables
-                lines: List[str] = []
-                for k, v in d.items():
-                    lines.append(f"{indent_str}{k} = {self._serialize_value(v, 0)}")
-                return "\n".join(lines)
+                return self._serialize_dict(cast(Dict[str, Any], value), indent)
             case _:
-                return str(value)
+                return self._serialize_fallback(value)
+
+    def _serialize_boolean(self, value: bool) -> str:
+        """Serialize a boolean value."""
+        return str(value).lower()
+
+    def _serialize_integer(self, value: int) -> str:
+        """Serialize an integer value."""
+        return str(value)
+
+    def _serialize_string(self, value: str) -> str:
+        """Serialize a string value with proper escaping."""
+        return f'"{value.replace("\\", "\\\\")}"'
+
+    def _serialize_empty_list(self) -> str:
+        """Serialize an empty list."""
+        return "[]"
+
+    def _serialize_list(self, items: List[Any], indent: int) -> str:
+        """Serialize a list with proper formatting and indentation."""
+        from typing import cast
+
+        if not items:
+            return "[]"
+
+        indent_str = "    " * indent
+        serialized_items: List[str] = []
+
+        for item in items:
+            if isinstance(item, str):
+                serialized_items.append(
+                    self._serialize_list_string_item(item, indent_str)
+                )
+            elif isinstance(item, dict):
+                serialized_items.append(
+                    self._serialize_list_dict_item(
+                        cast(Dict[str, Any], item), indent_str
+                    )
+                )
+            else:
+                serialized_items.append(
+                    self._serialize_list_other_item(item, indent_str)
+                )
+
+        return "[\n" + ",\n".join(serialized_items) + "\n" + indent_str + "]"
+
+    def _serialize_list_string_item(self, item: str, indent_str: str) -> str:
+        """Serialize a string item within a list."""
+        return f'{indent_str}    "{item.replace("\\", "\\\\")}"'
+
+    def _serialize_list_dict_item(
+        self, item_dict: Dict[str, Any], indent_str: str
+    ) -> str:
+        """Serialize a dictionary item within a list as an inline table."""
+        table_items: List[str] = []
+        for k, v in item_dict.items():
+            if isinstance(v, str):
+                table_items.append(f'{k} = "{v.replace("\\", "\\\\")}"')
+            else:
+                table_items.append(f"{k} = {self._serialize_value(v, 0)}")
+        return f"{indent_str}    {{ {', '.join(table_items)} }}"
+
+    def _serialize_list_other_item(self, item: Any, indent_str: str) -> str:
+        """Serialize a non-string, non-dict item within a list."""
+        return f"{indent_str}    {self._serialize_value(item, 0)}"
+
+    def _serialize_dict(self, d: Dict[str, Any], indent: int) -> str:
+        """Serialize a dictionary as TOML key-value pairs."""
+        indent_str = "    " * indent
+        lines: List[str] = []
+        for k, v in d.items():
+            lines.append(f"{indent_str}{k} = {self._serialize_value(v, 0)}")
+        return "\n".join(lines)
+
+    def _serialize_fallback(self, value: Any) -> str:
+        """Fallback serialization for unknown types."""
+        return str(value)
 
     def create_default_config(self) -> None:
         """Create default configuration file."""

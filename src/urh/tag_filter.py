@@ -32,11 +32,8 @@ class OCITagFilter:
         self.repo_config = config.repositories.get(repository, RepositoryConfig())
         self.context = context
 
-    def should_filter_tag(self, tag: str) -> bool:
-        """Determine if a tag should be filtered out."""
-        tag_lower = tag.lower()
-
-        # Handle latest. tags
+    def _should_filter_latest_tag(self, tag_lower: str) -> bool:
+        """Handle filtering of latest. tags."""
         if tag_lower.startswith("latest."):
             suffix = tag_lower[7:]
             if not suffix:
@@ -44,25 +41,46 @@ class OCITagFilter:
             if len(suffix) >= 8 and suffix.isdigit():
                 return False  # Date format, keep for transformation
             return True  # Non-date format, filter out
+        return False
 
-        # Check ignore list
-        if tag_lower in [t.lower() for t in self.repo_config.ignore_tags]:
-            return True
+    def _should_filter_ignore_list(self, tag_lower: str) -> bool:
+        """Check if tag should be filtered based on ignore list."""
+        return tag_lower in [t.lower() for t in self.repo_config.ignore_tags]
 
-        # Check filter patterns using cached patterns
+    def _should_filter_patterns(self, tag_lower: str) -> bool:
+        """Check if tag should be filtered based on filter patterns."""
         for pattern in self.repo_config.filter_patterns:
             compiled_pattern = _get_compiled_pattern(pattern)
             if compiled_pattern.match(tag_lower):
                 return True
+        return False
 
-        # Filter signature tags
-        if tag_lower.endswith(".sig") and "sha256-" in tag_lower:
-            return True
+    def _should_filter_signature_tags(self, tag_lower: str) -> bool:
+        """Check if tag should be filtered as a signature tag."""
+        return tag_lower.endswith(".sig") and "sha256-" in tag_lower
 
-        # Filter SHA256 hashes
+    def _should_filter_sha256_hashes(self, tag: str) -> bool:
+        """Check if tag should be filtered as a SHA256 hash."""
         if not self.repo_config.include_sha256_tags:
             if len(tag) == 64 and all(c in "0123456789abcdefABCDEF" for c in tag):
                 return True
+        return False
+
+    def should_filter_tag(self, tag: str) -> bool:
+        """Determine if a tag should be filtered out."""
+        tag_lower = tag.lower()
+
+        # Check each filter condition in sequence
+        if self._should_filter_latest_tag(tag_lower):
+            return True
+        if self._should_filter_ignore_list(tag_lower):
+            return True
+        if self._should_filter_patterns(tag_lower):
+            return True
+        if self._should_filter_signature_tags(tag_lower):
+            return True
+        if self._should_filter_sha256_hashes(tag):
+            return True
 
         return False
 
@@ -113,69 +131,82 @@ class OCITagFilter:
 
         return context_tags
 
+    def _is_prefixed_tag(self, tag: str) -> bool:
+        """Check if a tag is prefixed with testing-, stable-, or unstable-."""
+        return tag.startswith(("testing-", "stable-", "unstable-"))
+
+    def _create_version_key_from_match(
+        self,
+        match,
+        series_group: int = 1,
+        date_group: int = 2,
+        subver_group: Optional[int] = 3,
+    ) -> Tuple[str, str, str]:
+        """Create version key from regex match with flexible group positions."""
+        series = match.group(series_group) or ""
+        date = match.group(date_group)
+        subver = (
+            match.group(subver_group) or "0"
+            if subver_group and match.group(subver_group)
+            else "0"
+        )
+        return (series, date, subver)
+
+    def _handle_version_tag_deduplication(
+        self, tag: str, version_key: Tuple[str, str, str], version_map: Dict
+    ) -> None:
+        """Handle deduplication logic for version tags."""
+        is_prefixed = self._is_prefixed_tag(tag)
+
+        # If this version is not in the map, add it
+        # OR if this tag is prefixed and currently stored is not prefixed, replace it
+        # But don't replace an existing prefixed tag with another prefixed tag
+        if version_key not in version_map:
+            version_map[version_key] = tag
+        elif is_prefixed and not self._is_prefixed_tag(version_map[version_key]):
+            # Replace non-prefixed with prefixed
+            version_map[version_key] = tag
+        # Otherwise, keep the existing one (whether prefixed or not)
+
+    def _handle_date_only_tag_deduplication(self, tag: str, version_map: Dict) -> bool:
+        """Handle deduplication logic for date-only tags."""
+        date_only_match = re.match(
+            r"^(?:testing-|stable-|unstable-)?(\d{8})(?:\.(\d+))?$", tag
+        )
+        if date_only_match:
+            # Date-only format: no series (empty string), date, subver
+            version_key = self._create_version_key_from_match(
+                date_only_match, series_group=1, date_group=2, subver_group=2
+            )
+
+            is_prefixed = self._is_prefixed_tag(tag)
+
+            # Use the same logic for storing
+            if version_key not in version_map:
+                version_map[version_key] = tag
+            elif is_prefixed and not self._is_prefixed_tag(version_map[version_key]):
+                # Replace non-prefixed with prefixed
+                version_map[version_key] = tag
+            return True  # Tag was handled
+        return False  # Tag was not handled
+
     def _deduplicate_tags_by_version(self, tags: List[str]) -> List[str]:
         """Deduplicate tags by version, preferring prefixed versions when available."""
         version_map: Dict[Union[Tuple[str, str, str], str], str] = {}
 
         for tag in tags:
-            # Extract version components - handle different formats
-            # Format 1: [prefix-][XX.]YYYYMMDD[.N] where XX is optional series number
-            # Format 2: [prefix-]XX.YYYYYYYY[.N] where XX is required series number
             # Try more specific pattern first: prefixed with series number
             version_match = re.match(
                 r"^(?:testing-|stable-|unstable-)?(\d{2})\.(\d{8})(?:\.(\d+))?$", tag
             )
 
-            if not version_match:
-                # Try date-only format (like YYYYMMDD)
-                date_only_match = re.match(
-                    r"^(?:testing-|stable-|unstable-)?(\d{8})(?:\.(\d+))?$", tag
-                )
-                if date_only_match:
-                    # Date-only format: no series (empty string), date, subver
-                    date = date_only_match.group(1)
-                    subver = date_only_match.group(2) or "0"
-                    version_key = ("", date, subver)
-
-                    # Check if this is a prefixed tag
-                    is_prefixed = any(
-                        tag.startswith(prefix)
-                        for prefix in ["testing-", "stable-", "unstable-"]
-                    )
-
-                    # Use the same logic for storing
-                    if version_key not in version_map:
-                        version_map[version_key] = tag
-                    elif is_prefixed and not any(
-                        version_map[version_key].startswith(prefix)
-                        for prefix in ["testing-", "stable-", "unstable-"]
-                    ):
-                        # Replace non-prefixed with prefixed
-                        version_map[version_key] = tag
-                    continue  # Continue to next tag since we handled this one
-
             if version_match:
-                series = version_match.group(1)
-                date = version_match.group(2)
-                subver = version_match.group(3) or "0"
-
-                # Create a version key
-                version_key = (series, date, subver)
-
-                # Check if this is a prefixed tag
-                is_prefixed = tag.startswith(("testing-", "stable-", "unstable-"))
-
-                # If this version is not in the map, add it
-                # OR if this tag is prefixed and currently stored is not prefixed, replace it
-                # But don't replace an existing prefixed tag with another prefixed tag
-                if version_key not in version_map:
-                    version_map[version_key] = tag
-                elif is_prefixed and not version_map[version_key].startswith(
-                    ("testing-", "stable-", "unstable-")
-                ):
-                    # Replace non-prefixed with prefixed
-                    version_map[version_key] = tag
-                # Otherwise, keep the existing one (whether prefixed or not)
+                # Handle version tags
+                version_key = self._create_version_key_from_match(version_match)
+                self._handle_version_tag_deduplication(tag, version_key, version_map)
+            elif self._handle_date_only_tag_deduplication(tag, version_map):
+                # Date-only tag was handled, continue to next tag
+                continue
             else:
                 # For non-version tags, just add them directly
                 version_map[tag] = tag

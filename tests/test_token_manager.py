@@ -191,3 +191,75 @@ class TestOCITokenManager:
         token_manager = OCITokenManager("test/repo")
         # Should not raise an exception
         token_manager.invalidate_cache()
+
+    def test_get_token_exception_handling(self, mocker):
+        """Test exception handling in get_token method (line 83)."""
+        # Mock file existence to False to trigger token fetching
+        mocker.patch("os.path.exists", return_value=False)
+
+        # Mock subprocess.run to raise an exception
+        mock_subprocess = mocker.patch(
+            "subprocess.run", side_effect=Exception("Network error")
+        )
+
+        # Mock logger.error to verify it's called
+        mock_logger_error = mocker.patch("src.urh.token_manager.logger.error")
+
+        # Mock print to capture the error message
+        mock_print = mocker.patch("builtins.print")
+
+        token_manager = OCITokenManager("test/repo")
+        token = token_manager.get_token()
+
+        # Should return None when an exception occurs
+        assert token is None
+        mock_subprocess.assert_called_once()
+        mock_logger_error.assert_called_once_with("Error getting token: Network error")
+        mock_print.assert_called_once_with("Error getting token: Network error")
+
+    def test_parse_link_header_various_formats(self):
+        """Test parse_link_header with various Link header formats (lines 110-122)."""
+        token_manager = OCITokenManager("test/repo")
+
+        # Test with None input
+        result = token_manager.parse_link_header(None)
+        assert result is None
+
+        # Test with empty string
+        result = token_manager.parse_link_header("")
+        assert result is None
+
+        # Test standard format
+        link_header = '</v2/user/repo/tags/list?last=tag1&n=200>; rel="next"'
+        result = token_manager.parse_link_header(link_header)
+        assert result == "/v2/user/repo/tags/list?last=tag1&n=200"
+
+        # Test with spaces around the entire link (valid format)
+        link_header = ' < /v2/user/repo/tags/list?last=tag2&n=200 > ; rel = "next" '
+        result = token_manager.parse_link_header(link_header)
+        assert result == "/v2/user/repo/tags/list?last=tag2&n=200"
+
+        # Test with single quotes
+        link_header = "</v2/user/repo/tags/list?last=tag3&n=200>; rel='next'"
+        result = token_manager.parse_link_header(link_header)
+        assert result == "/v2/user/repo/tags/list?last=tag3&n=200"
+
+        # Test with spaces around rel attribute
+        link_header = '</v2/user/repo/tags/list?last=tag4&n=200>; rel = "next"'
+        result = token_manager.parse_link_header(link_header)
+        assert result == "/v2/user/repo/tags/list?last=tag4&n=200"
+
+        # Test with multiple links (should return first next link)
+        link_header = '</v2/user/repo/tags/list?last=tag5&n=200>; rel="next", </v2/user/repo/tags/list?last=tag6&n=200>; rel="prev"'
+        result = token_manager.parse_link_header(link_header)
+        assert result == "/v2/user/repo/tags/list?last=tag5&n=200"
+
+        # Test with no next link
+        link_header = '</v2/user/repo/tags/list?last=tag7&n=200>; rel="prev"'
+        result = token_manager.parse_link_header(link_header)
+        assert result is None
+
+        # Test with malformed link header
+        link_header = "malformed header"
+        result = token_manager.parse_link_header(link_header)
+        assert result is None
