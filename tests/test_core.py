@@ -1,8 +1,5 @@
 """Unit tests for the core module."""
 
-import os
-import sys
-
 
 class TestCore:
     """Test core functionality."""

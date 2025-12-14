@@ -1,8 +1,6 @@
 """Tests for the commands module."""
 
 import os
-import subprocess
-from typing import List
 
 import pytest
 
@@ -379,8 +377,6 @@ class TestCommandWorkflows:
         setup = command_test_setup
         deployment_setup = deployment_test_scenario
 
-        registry = CommandRegistry()
-
         # Test that the mocks are properly set up
         assert setup["config"].return_value is not None
         assert setup["deployment"].return_value is not None
@@ -449,6 +445,13 @@ class TestCommandsCoverage:
         mock_config = mocker.MagicMock()
         mock_config.container_urls.options = ["ghcr.io/test/repo:testing"]
         mocker.patch("src.urh.config.get_config", return_value=mock_config)
+
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
 
         # Call rebase with no args (should show menu and handle ESC gracefully)
         registry._handle_rebase([])
@@ -580,11 +583,8 @@ class TestCommandRegistryHandlers:
 
     def test_handle_pin_no_deployments(self, mocker):
         """Test _handle_pin when no deployments are found."""
-        mock_get_deployment_info = mocker.patch(
-            "src.urh.deployment.get_deployment_info", return_value=[]
-        )
-        mock_print = mocker.patch("builtins.print")
-        registry = CommandRegistry()
+        mocker.patch("src.urh.deployment.get_deployment_info", return_value=[])
+        mocker.patch("builtins.print")
 
     def test_handle_rebase_menu_exit_exception(self, mocker):
         """Test rebase MenuExitException handling when ESC is pressed (line 351)."""
@@ -617,7 +617,7 @@ class TestCommandRegistryHandlers:
         registry = CommandRegistry()
 
         # Mock deployments with both pinned and unpinned deployments
-        mock_get_deployment_info = mocker.patch(
+        mocker.patch(
             "src.urh.deployment.get_deployment_info",
             return_value=[
                 DeploymentInfo(
@@ -637,7 +637,6 @@ class TestCommandRegistryHandlers:
             ],
         )
         mock_print = mocker.patch("builtins.print")
-        mock_sys_exit = mocker.patch("sys.exit")
         mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         # Mock the menu system to simulate selecting a pinned deployment

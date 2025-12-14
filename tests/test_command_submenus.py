@@ -21,6 +21,12 @@ class TestCommandSubmenus:
         mocker.patch(
             "src.urh.deployment.get_deployment_info", return_value=mock_deployments
         )
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
         mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
@@ -47,6 +53,12 @@ class TestCommandSubmenus:
         ]
         mocker.patch(
             "src.urh.deployment.get_deployment_info", return_value=mock_deployments
+        )
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
         )
         mock_sys_exit = mocker.patch("sys.exit")
 
@@ -80,6 +92,12 @@ class TestCommandSubmenus:
         mocker.patch(
             "src.urh.deployment.get_deployment_info", return_value=mock_deployments
         )
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
         mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
 
@@ -107,6 +125,12 @@ class TestCommandSubmenus:
         mocker.patch(
             "src.urh.deployment.get_deployment_info", return_value=mock_deployments
         )
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
@@ -126,6 +150,12 @@ class TestCommandSubmenus:
         ]
         mocker.patch(
             "src.urh.deployment.get_deployment_info", return_value=mock_deployments
+        )
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
         )
         mock_run_command = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_sys_exit = mocker.patch("sys.exit")
@@ -167,6 +197,13 @@ class TestCommandSubmenus:
         mock_oci_client_cls.return_value = mock_oci_instance
         mock_sys_exit = mocker.patch("sys.exit")
 
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
+
         registry = CommandRegistry()
 
         # Call the handler with no arguments to trigger menu
@@ -191,6 +228,20 @@ class TestCommandSubmenus:
         mock_config = Mock()
         mock_config.container_urls.options = ["ghcr.io/user/repo:latest"]
         mocker.patch("src.urh.config.get_config", return_value=mock_config)
+
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
+
+        # Mock get_deployment_info to avoid expensive subprocess calls
+        mock_deployments = []
+        mocker.patch(
+            "src.urh.deployment.get_deployment_info", return_value=mock_deployments
+        )
+
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
@@ -222,6 +273,12 @@ class TestCommandSubmenus:
             "tags": []
         }  # No tags found
         mock_oci_client_cls.return_value = mock_oci_instance
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()
@@ -250,6 +307,12 @@ class TestCommandSubmenus:
         mock_oci_instance = Mock()
         mock_oci_instance.fetch_repository_tags.return_value = {}  # Error case
         mock_oci_client_cls.return_value = mock_oci_instance
+        # Mock get_current_deployment_info to avoid expensive subprocess calls
+        mock_deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value=mock_deployment_info,
+        )
         mock_sys_exit = mocker.patch("sys.exit")
 
         registry = CommandRegistry()

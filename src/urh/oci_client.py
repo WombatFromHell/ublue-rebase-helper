@@ -434,7 +434,7 @@ class OCIClient:
     def _parse_response_body(self, body: str) -> Optional[Dict[str, Any]]:
         """Parse JSON response body and handle errors."""
         if not body.strip():
-            logger.debug(f"Empty response body")
+            logger.debug("Empty response body")
             return None
 
         logger.debug(f"Response body: {repr(body)}")

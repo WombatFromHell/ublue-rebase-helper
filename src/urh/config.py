@@ -246,7 +246,6 @@ class ConfigManager:
         self, repositories_list: List[Dict[str, Any]], config: URHConfig
     ) -> None:
         """Parse repository configurations."""
-        from typing import cast
 
         for repo_data in repositories_list:
             repo_name = repo_data.get("name")
@@ -258,7 +257,6 @@ class ConfigManager:
 
     def _create_repository_config(self, repo_data: Dict[str, Any]) -> RepositoryConfig:
         """Create a RepositoryConfig from parsed data."""
-        from typing import cast
 
         include_sha256_tags = repo_data.get("include_sha256_tags", False)
         filter_patterns = self._extract_string_list(repo_data, "filter_patterns")
@@ -309,7 +307,6 @@ class ConfigManager:
         self, urls_data: Dict[str, Any], config: URHConfig
     ) -> None:
         """Parse container URL configurations."""
-        from typing import cast
 
         default = self._extract_string_with_default(
             urls_data, "default", config.container_urls.default

@@ -517,9 +517,8 @@ class TestCLIErrorHandlingComprehensive:
         mocker.patch("src.urh.deployment.get_status_output", return_value=None)
         mocker.patch("src.urh.cli.setup_logging", return_value=None)
 
-        # Mock command registry and menu system
+        # Mock command registry
         mock_command_registry = mocker.MagicMock()
-        mock_menu_system = mocker.MagicMock()
 
         # Mock _main_menu_loop to raise an exception (simulating command execution failure)
         def mock_main_menu_loop_with_exception():
@@ -624,9 +623,8 @@ class TestCLIErrorHandlingComprehensive:
         mocker.patch("src.urh.deployment.get_status_output", return_value=None)
         mocker.patch("src.urh.cli.setup_logging", return_value=None)
 
-        # Mock command registry and menu system for successful execution
+        # Mock command registry for successful execution
         mock_command_registry = mocker.MagicMock()
-        mock_menu_system = mocker.MagicMock()
 
         # Mock _main_menu_loop to complete successfully and return None
         # This simulates the case where the menu loop completes without error

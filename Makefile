@@ -1,16 +1,12 @@
 PY = python3
 SRC_DIR = src
 BUILD_DIR = dist
-STAGING = .build
-ENTRY = src.entry:main
+ENTRY = entry:main
 OUT = $(BUILD_DIR)/urh.pyz
 
 build:
 	mkdir -p $(BUILD_DIR)
-	rm -rf $(STAGING)
-	mkdir -p $(STAGING)
-	cp -r $(SRC_DIR) $(STAGING)/
-	$(PY) -m zipapp $(STAGING) -o $(OUT) -m $(ENTRY) -p "/usr/bin/env python3"
+	$(PY) -m zipapp $(SRC_DIR) -o $(OUT) -m $(ENTRY) -p "/usr/bin/env python3"
 	chmod +x $(OUT)
 
 install: $(OUT)
@@ -47,7 +43,6 @@ radon:
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
 	rm -rf \
-		$(STAGING) \
 		$(BUILD_DIR) \
 		.pytest_cache \
 		.ruff_cache \

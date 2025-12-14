@@ -443,20 +443,34 @@ class CommandRegistry:
 
     def _handle_pin(self, args: List[str]) -> None:
         """Handle the pin command."""
-        from .deployment import get_deployment_info
+        deployment_num = None
 
-        deployments = get_deployment_info()
-        if not deployments:
-            print("No deployments found.")  # Keep as print for test compatibility
-            return
+        if args:
+            # When arguments are provided, we don't need deployment info
+            try:
+                deployment_num = int(args[0])
+            except ValueError:
+                print(
+                    f"Invalid deployment number: {args[0]}"
+                )  # Keep as print for test compatibility
+                sys.exit(1)
+        else:
+            # When no arguments are provided, show menu and get deployment info
+            from .deployment import get_deployment_info
 
-        deployment_num = self._get_deployment_number_for_pin(args, deployments)
+            deployments = get_deployment_info()
+            if not deployments:
+                print("No deployments found.")  # Keep as print for test compatibility
+                return
 
-        if deployment_num is None:
-            return  # User cancelled or invalid input
+            deployment_num = self._get_deployment_number_for_pin(args, deployments)
 
-        cmd = ["sudo", "ostree", "admin", "pin", str(deployment_num)]
-        sys.exit(_run_command(cmd))
+            if deployment_num is None:
+                return  # User cancelled or invalid input
+
+        if deployment_num is not None:
+            cmd = ["sudo", "ostree", "admin", "pin", str(deployment_num)]
+            sys.exit(_run_command(cmd))
 
     def _get_deployment_number_for_pin(
         self, args: List[str], deployments: List
@@ -553,20 +567,34 @@ class CommandRegistry:
 
     def _handle_unpin(self, args: List[str]) -> None:
         """Handle the unpin command."""
-        from .deployment import get_deployment_info
+        deployment_num = None
 
-        deployments = get_deployment_info()
-        if not deployments:
-            print("No deployments found.")  # Keep as print for test compatibility
-            return
+        if args:
+            # When arguments are provided, we don't need deployment info
+            try:
+                deployment_num = int(args[0])
+            except ValueError:
+                print(
+                    f"Invalid deployment number: {args[0]}"
+                )  # Keep as print for test compatibility
+                sys.exit(1)
+        else:
+            # When no arguments are provided, show menu and get deployment info
+            from .deployment import get_deployment_info
 
-        deployment_num = self._get_deployment_number_for_unpin(args, deployments)
+            deployments = get_deployment_info()
+            if not deployments:
+                print("No deployments found.")  # Keep as print for test compatibility
+                return
 
-        if deployment_num is None:
-            return  # User cancelled or invalid input
+            deployment_num = self._get_deployment_number_for_unpin(args, deployments)
 
-        cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deployment_num)]
-        sys.exit(_run_command(cmd))
+            if deployment_num is None:
+                return  # User cancelled or invalid input
+
+        if deployment_num is not None:
+            cmd = ["sudo", "ostree", "admin", "pin", "-u", str(deployment_num)]
+            sys.exit(_run_command(cmd))
 
     def _get_deployment_number_for_unpin(
         self, args: List[str], deployments: List
@@ -623,16 +651,17 @@ class CommandRegistry:
 
     def _handle_rm(self, args: List[str]) -> None:
         """Handle the rm command."""
-        from .deployment import get_deployment_info
-
-        deployments = get_deployment_info()
-        if not deployments:
-            print("No deployments found.")  # Keep as print for test compatibility
-            return
-
         deployment_num = None  # Initialize variable
 
         if not args:
+            # When no arguments are provided, show menu and get deployment info
+            from .deployment import get_deployment_info
+
+            deployments = get_deployment_info()
+            if not deployments:
+                print("No deployments found.")  # Keep as print for test compatibility
+                return
+
             try:
                 from .models import ListItem  # Import here to avoid circular import
 
@@ -669,6 +698,7 @@ class CommandRegistry:
                 # ESC pressed in submenu, return to main menu
                 return
         else:
+            # When arguments are provided, we don't need deployment info
             try:
                 deployment_num = int(args[0])
             except ValueError:
@@ -686,20 +716,34 @@ class CommandRegistry:
 
     def _handle_undeploy(self, args: List[str]) -> None:
         """Handle the undeploy command."""
-        from .deployment import get_deployment_info
+        deployment_num = None
 
-        deployments = get_deployment_info()
-        if not deployments:
-            print("No deployments found.")  # Keep as print for test compatibility
-            return
+        if args:
+            # When arguments are provided, we don't need deployment info
+            try:
+                deployment_num = int(args[0])
+            except ValueError:
+                print(
+                    f"Invalid deployment number: {args[0]}"
+                )  # Keep as print for test compatibility
+                sys.exit(1)
+        else:
+            # When no arguments are provided, show menu and get deployment info
+            from .deployment import get_deployment_info
 
-        deployment_num = self._get_deployment_number_for_undeploy(args, deployments)
+            deployments = get_deployment_info()
+            if not deployments:
+                print("No deployments found.")  # Keep as print for test compatibility
+                return
 
-        if deployment_num is None:
-            return  # User cancelled or invalid input
+            deployment_num = self._get_deployment_number_for_undeploy(args, deployments)
 
-        cmd = ["sudo", "ostree", "admin", "undeploy", str(deployment_num)]
-        sys.exit(_run_command(cmd))
+            if deployment_num is None:
+                return  # User cancelled or invalid input
+
+        if deployment_num is not None:
+            cmd = ["sudo", "ostree", "admin", "undeploy", str(deployment_num)]
+            sys.exit(_run_command(cmd))
 
     def _get_deployment_number_for_undeploy(
         self, args: List[str], deployments: List
@@ -747,11 +791,6 @@ class CommandRegistry:
         self, deployments: List
     ) -> Optional[int]:
         """Show menu to select deployment for undeploying with confirmation."""
-        from .deployment import format_deployment_header, get_current_deployment_info
-        from .models import ListItem
-
-        # Show ALL deployments (same as 'pin' command shows all)
-        all_deployments = deployments[::-1]  # Reverse order to show newest first
 
         # Create menu items using existing helper
         items = self._create_deployment_menu_items(deployments)

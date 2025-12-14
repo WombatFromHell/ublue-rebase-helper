@@ -1,7 +1,6 @@
 """Tests for the config module."""
 
 import os
-import re
 import tempfile
 from pathlib import Path
 
