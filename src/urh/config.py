@@ -99,9 +99,11 @@ class URHConfig:
             options=[
                 "ghcr.io/wombatfromhell/bazzite-nix:testing",
                 "ghcr.io/wombatfromhell/bazzite-nix:stable",
+                "ghcr.io/wombatfromhell/bazzite-nvidia-open-nix:stable",
                 "ghcr.io/ublue-os/bazzite:stable",
                 "ghcr.io/ublue-os/bazzite:testing",
-                "ghcr.io/ublue-os/bazzite:unstable",
+                "ghcr.io/ublue-os/bazzite-nvidia-open:stable",
+                "ghcr.io/ublue-os/bazzite-nvidia-open:testing",
                 "ghcr.io/astrovm/amyos:latest",
             ],
         )
@@ -109,68 +111,80 @@ class URHConfig:
     settings: SettingsConfig = field(default_factory=lambda: SettingsConfig())
 
     @classmethod
-    def get_default(cls) -> Self:
-        """Get default configuration."""
-        config = cls()
+    def _get_standard_filter_patterns(cls) -> List[str]:
+        """Get standard filter patterns for most repositories."""
+        return [
+            r"^sha256-.*\.sig$",
+            r"^sha256-.*",
+            r"^sha256:.*",
+            r"^[0-9a-fA-F]{40,64}$",
+            r"^<.*>$",
+            r"^(latest|testing|stable|unstable)$",
+            r"^testing\..*",
+            r"^stable\..*",
+            r"^unstable\..*",
+            r"^\d{1,2}$",
+            r"^(latest|testing|stable|unstable)-\d{1,2}$",
+            r"^\d{1,2}-(testing|stable|unstable)$",
+        ]
 
-        # Add default repository configurations
-        config.repositories["ublue-os/bazzite"] = RepositoryConfig(
+    @classmethod
+    def _get_amyos_filter_patterns(cls) -> List[str]:
+        """Get filter patterns for astrovm/amyos repository."""
+        return [
+            r"^sha256-.*\.sig$",
+            r"^<.*>$",
+            r"^(testing|stable|unstable)$",
+            r"^testing\..*",
+            r"^stable\..*",
+            r"^unstable\..*",
+            r"^\d{1,2}$",
+            r"^(latest|testing|stable|unstable)-\d{1,2}$",
+            r"^\d{1,2}-(testing|stable|unstable)$",
+        ]
+
+    @classmethod
+    def _create_standard_repository_config(cls) -> RepositoryConfig:
+        """Create standard repository configuration."""
+        return RepositoryConfig(
             include_sha256_tags=False,
-            filter_patterns=[
-                r"^sha256-.*\.sig$",
-                r"^sha256-.*",
-                r"^sha256:.*",
-                r"^[0-9a-fA-F]{40,64}$",
-                r"^<.*>$",
-                r"^(latest|testing|stable|unstable)$",
-                r"^testing\..*",
-                r"^stable\..*",
-                r"^unstable\..*",
-                r"^\d{1,2}$",
-                r"^(latest|testing|stable|unstable)-\d{1,2}$",
-                r"^\d{1,2}-(testing|stable|unstable)$",
-            ],
+            filter_patterns=cls._get_standard_filter_patterns(),
             ignore_tags=["latest", "testing", "stable", "unstable"],
         )
 
-        config.repositories["wombatfromhell/bazzite-nix"] = RepositoryConfig(
+    @classmethod
+    def _create_amyos_repository_config(cls) -> RepositoryConfig:
+        """Create astrovm/amyos repository configuration."""
+        return RepositoryConfig(
             include_sha256_tags=False,
-            filter_patterns=[
-                r"^sha256-.*\.sig$",
-                r"^sha256-.*",
-                r"^sha256:.*",
-                r"^[0-9a-fA-F]{40,64}$",
-                r"^<.*>$",
-                r"^(latest|testing|stable|unstable)$",
-                r"^testing\..*",
-                r"^stable\..*",
-                r"^unstable\..*",
-                r"^\d{1,2}$",
-                r"^(latest|testing|stable|unstable)-\d{1,2}$",
-                r"^\d{1,2}-(testing|stable|unstable)$",
-            ],
-            ignore_tags=["latest", "testing", "stable", "unstable"],
-        )
-
-        config.repositories["astrovm/amyos"] = RepositoryConfig(
-            include_sha256_tags=False,
-            filter_patterns=[
-                r"^sha256-.*\.sig$",
-                r"^<.*>$",
-                r"^(testing|stable|unstable)$",
-                r"^testing\..*",
-                r"^stable\..*",
-                r"^unstable\..*",
-                r"^\d{1,2}$",
-                r"^(latest|testing|stable|unstable)-\d{1,2}$",
-                r"^\d{1,2}-(testing|stable|unstable)$",
-            ],
+            filter_patterns=cls._get_amyos_filter_patterns(),
             ignore_tags=["testing", "stable", "unstable"],
             transform_patterns=[
                 {"pattern": r"^latest\.(\d{8})$", "replacement": r"\1"}
             ],
             latest_dot_handling="transform_dates_only",
         )
+
+    @classmethod
+    def get_default(cls) -> Self:
+        """Get default configuration."""
+        config = cls()
+
+        # Standard repositories with identical configuration
+        standard_repos = [
+            "ublue-os/bazzite",
+            "ublue-os/bazzite-nvidia-open",
+            "wombatfromhell/bazzite-nix",
+            "wombatfromhell/bazzite-nvidia-open-nix",
+        ]
+
+        # Create standard repository configurations
+        standard_config = cls._create_standard_repository_config()
+        for repo_name in standard_repos:
+            config.repositories[repo_name] = standard_config
+
+        # Create special astrovm/amyos configuration
+        config.repositories["astrovm/amyos"] = cls._create_amyos_repository_config()
 
         return config
 
@@ -181,6 +195,23 @@ class ConfigManager:
     def __init__(self):
         self._config: Optional[URHConfig] = None
         self._config_path: Optional[Path] = None
+
+    def _get_standard_filter_patterns(self) -> List[str]:
+        """Get standard filter patterns for most repositories."""
+        return [
+            r"^sha256-.*\.sig$",
+            r"^sha256-.*",
+            r"^sha256:.*",
+            r"^[0-9a-fA-F]{40,64}$",
+            r"^<.*>$",
+            r"^(latest|testing|stable|unstable)$",
+            r"^testing\..*",
+            r"^stable\..*",
+            r"^unstable\..*",
+            r"^\d{1,2}$",
+            r"^(latest|testing|stable|unstable)-\d{1,2}$",
+            r"^\d{1,2}-(testing|stable|unstable)$",
+        ]
 
     def get_config_path(self) -> Path:
         """Get the path to the configuration file with caching."""
@@ -256,11 +287,24 @@ class ConfigManager:
             config.repositories[repo_name] = repo_config
 
     def _create_repository_config(self, repo_data: Dict[str, Any]) -> RepositoryConfig:
-        """Create a RepositoryConfig from parsed data."""
+        """Create a RepositoryConfig from parsed data with DRY optimizations."""
 
         include_sha256_tags = repo_data.get("include_sha256_tags", False)
-        filter_patterns = self._extract_string_list(repo_data, "filter_patterns")
-        ignore_tags = self._extract_string_list(repo_data, "ignore_tags")
+
+        # Use standard defaults for filter_patterns and ignore_tags if not specified
+        # This enables DRY TOML files where standard repos don't need to repeat common settings
+        if "filter_patterns" in repo_data:
+            filter_patterns = self._extract_string_list(repo_data, "filter_patterns")
+        else:
+            # Use standard filter patterns as default
+            filter_patterns = self._get_standard_filter_patterns()
+
+        if "ignore_tags" in repo_data:
+            ignore_tags = self._extract_string_list(repo_data, "ignore_tags")
+        else:
+            # Use standard ignore tags as default
+            ignore_tags = ["latest", "testing", "stable", "unstable"]
+
         transform_patterns = self._extract_transform_patterns(repo_data)
         latest_dot_handling = self._extract_optional_string(
             repo_data, "latest_dot_handling"
@@ -446,7 +490,7 @@ class ConfigManager:
         return str(value)
 
     def create_default_config(self) -> None:
-        """Create default configuration file."""
+        """Create default configuration file with DRY optimizations."""
         config_path = self.get_config_path()
         default_config = URHConfig.get_default()
 
@@ -455,54 +499,81 @@ class ConfigManager:
             f.write(f"# Default location: {config_path}\n")
             f.write("#\n")
             f.write("# For documentation about the format, see DESIGN.md\n")
+            f.write("#\n")
+            f.write(
+                "# This file uses DRY principles - common settings are inherited from defaults\n"
+            )
+            f.write("# Only overrides and special cases are explicitly specified\n")
             f.write("\n")
 
-            # Write repositories section as an array of tables
-            for repo_name, repo_config in default_config.repositories.items():
+            # Write standard repositories with shared configuration
+            standard_repos = [
+                "ublue-os/bazzite",
+                "ublue-os/bazzite-nvidia-open",
+                "wombatfromhell/bazzite-nix",
+                "wombatfromhell/bazzite-nvidia-open-nix",
+            ]
+
+            # Write comment explaining the standard configuration
+            f.write(
+                "# Standard repositories share the same filter patterns and ignore tags\n"
+            )
+            f.write("# Defaults: include_sha256_tags = false\n")
+            f.write(
+                "# Standard filter patterns: SHA256 hashes, latest/testing/stable/unstable tags, etc.\n"
+            )
+            f.write("# Standard ignore tags: latest, testing, stable, unstable\n")
+            f.write("\n")
+
+            # Write standard repositories using defaults
+            for repo_name in standard_repos:
                 f.write("[[repository]]\n")
                 f.write(f'name = "{repo_name}"\n')
-                f.write(
-                    f"include_sha256_tags = {self._serialize_value(repo_config.include_sha256_tags)}\n"
-                )
-
-                # Write filter_patterns
-                f.write("filter_patterns = ")
-                f.write(self._serialize_value(repo_config.filter_patterns, 0) + "\n")
-
-                # Write ignore_tags
-                f.write("ignore_tags = ")
-                f.write(self._serialize_value(repo_config.ignore_tags, 0) + "\n")
-
-                # Write transform_patterns if present
-                if repo_config.transform_patterns:
-                    f.write("transform_patterns = ")
-                    f.write(
-                        self._serialize_value(repo_config.transform_patterns, 0) + "\n"
-                    )
-
-                # Write latest_dot_handling if present
-                if repo_config.latest_dot_handling:
-                    f.write(
-                        f'latest_dot_handling = "{repo_config.latest_dot_handling}"\n'
-                    )
-
+                # Only specify overrides if they differ from defaults
+                # include_sha256_tags defaults to false, so we don't need to specify it
                 f.write("\n")
+
+            # Write special astrovm/amyos repository with explicit configuration
+            f.write("# Special repository with custom configuration\n")
+            f.write("[[repository]]\n")
+            f.write('name = "astrovm/amyos"\n')
+            f.write("include_sha256_tags = false\n")
+
+            # Write filter_patterns (different from standard)
+            amyos_config = default_config.repositories["astrovm/amyos"]
+            f.write("filter_patterns = ")
+            f.write(self._serialize_value(amyos_config.filter_patterns, 0) + "\n")
+
+            # Write ignore_tags (different from standard - no "latest")
+            f.write("ignore_tags = ")
+            f.write(self._serialize_value(amyos_config.ignore_tags, 0) + "\n")
+
+            # Write transform_patterns
+            f.write("transform_patterns = ")
+            f.write(self._serialize_value(amyos_config.transform_patterns, 0) + "\n")
+
+            # Write latest_dot_handling
+            f.write(f'latest_dot_handling = "{amyos_config.latest_dot_handling}"\n')
+
+            f.write("\n")
 
             # Write container URLs section
             f.write("[container_urls]\n")
             f.write(f'default = "{default_config.container_urls.default}"\n')
-            f.write("options = ")
-            f.write(
-                self._serialize_value(default_config.container_urls.options, 0) + "\n"
-            )
+            f.write("options = [\n")
+            for url in default_config.container_urls.options:
+                f.write(f'    "{url}",\n')
+            f.write("]\n")
             f.write("\n")
 
             # Write settings section
             f.write("[settings]\n")
-            f.write(f"max_tags_display = {default_config.settings.max_tags_display}\n")
+            f.write("# Default: max_tags_display = 30\n")
+            f.write("# Default: debug_mode = false\n")
             f.write(
-                f"debug_mode = {self._serialize_value(default_config.settings.debug_mode)}\n"
+                "# Settings are commented out to show defaults - uncomment to override\n"
             )
+            f.write("\n")
 
 
 # Global config manager instance
