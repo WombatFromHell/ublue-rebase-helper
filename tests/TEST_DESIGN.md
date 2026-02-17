@@ -190,6 +190,44 @@ def test_multiple_mocks(mocker):
 
 ## Using Centralized Fixtures
 
+### Keeping Fixtures in Sync with Source Code
+
+When fixtures need to reflect configuration or data defined in source code, **import the source of truth** rather than duplicating data:
+
+```python
+# ✅ CORRECT: Import constants from source code
+from src.urh.config import _ALL_REPOSITORIES
+
+@pytest.fixture(scope="session")
+def sample_config_data():
+    # Generate from source of truth - stays in sync automatically
+    container_options = [
+        f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES
+    ]
+    return {
+        "container_urls": {"default": "...", "options": container_options},
+        # ...
+    }
+
+# ❌ WRONG: Hardcode duplicate data that will drift
+@pytest.fixture(scope="session")
+def sample_config_data():
+    return {
+        "container_urls": {
+            "options": [
+                "ghcr.io/repo1:tag",  # Must manually update when source changes
+                "ghcr.io/repo2:tag",
+            ]
+        },
+        # ...
+    }
+```
+
+**Benefits:**
+- Adding a new endpoint in source code automatically updates all tests
+- No risk of test data drifting from production behavior
+- Single source of truth principle applied to test fixtures
+
 ### Session-Scoped (Reusable Across All Tests)
 
 ```python

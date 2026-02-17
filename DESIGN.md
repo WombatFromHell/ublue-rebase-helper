@@ -194,6 +194,14 @@ The container URLs available in the rebase and remote-ls submenus are defined in
 - `default`: The default container URL to use
 - `options`: List of available container URLs in the submenu
 
+**Single Source of Truth**: Repository endpoints are defined once in `config.py` using module-level constants:
+
+- `_STANDARD_REPOSITORIES`: Tuple of `(repo_name, default_tag)` for standard repositories
+- `_SPECIAL_REPOSITORIES`: Tuple of `(repo_name, default_tag)` for repositories with custom configurations
+- `_ALL_REPOSITORIES`: Combined tuple of all repositories
+
+All container URL lists (in `ContainerURLsConfig`, `URHConfig.get_default()`, and `ConfigManager._write_default_config()`) are derived from these constants. To add a new endpoint, add one entry to `_STANDARD_REPOSITORIES` or `_SPECIAL_REPOSITORIES`.
+
 ### Settings Configuration
 
 Global settings are defined in the `[settings]` section:

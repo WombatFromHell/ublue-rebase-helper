@@ -21,7 +21,11 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.urh.commands import CommandRegistry  # noqa: E402
-from src.urh.config import ContainerURLsConfig, URHConfig  # noqa: E402
+from src.urh.config import (  # noqa: E402
+    _ALL_REPOSITORIES,
+    ContainerURLsConfig,
+    URHConfig,
+)
 from src.urh.deployment import DeploymentInfo  # noqa: E402
 
 # =============================================================================
@@ -36,7 +40,13 @@ def sample_config_data() -> Dict[str, Any]:
 
     Use this fixture when you need consistent config data across tests.
     Avoid modifying the returned data to maintain test isolation.
+
+    Container URLs are generated from _ALL_REPOSITORIES to stay in sync
+    with the single source of truth in config.py.
     """
+    # Generate container URLs from central source of truth
+    container_options = [f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES]
+
     return {
         "repository": [
             {
@@ -65,12 +75,7 @@ def sample_config_data() -> Dict[str, Any]:
         ],
         "container_urls": {
             "default": "ghcr.io/wombatfromhell/bazzite-nix:testing",
-            "options": [
-                "ghcr.io/wombatfromhell/bazzite-nix:testing",
-                "ghcr.io/wombatfromhell/bazzite-nix:stable",
-                "ghcr.io/ublue-os/bazzite:stable",
-                "ghcr.io/astrovm/amyos:latest",
-            ],
+            "options": container_options,
         },
         "settings": {
             "max_tags_display": 30,

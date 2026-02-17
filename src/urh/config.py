@@ -16,6 +16,28 @@ from .constants import MAX_TAGS_DISPLAY
 logger = logging.getLogger(__name__)
 
 
+# Single source of truth for standard repositories
+# Format: (repo_name, default_tag)
+_STANDARD_REPOSITORIES: tuple[tuple[str, str], ...] = (
+    ("wombatfromhell/bazzite-nix", "testing"),
+    ("wombatfromhell/bazzite-nix", "stable"),
+    ("wombatfromhell/bazzite-nix-cachyos", "testing"),
+    ("wombatfromhell/bazzite-nvidia-open-nix", "stable"),
+    ("ublue-os/bazzite", "testing"),
+    ("ublue-os/bazzite", "stable"),
+    ("ublue-os/bazzite-nvidia-open", "stable"),
+)
+
+# Special repositories with custom configurations
+_SPECIAL_REPOSITORIES: tuple[tuple[str, str], ...] = (("astrovm/amyos", "latest"),)
+
+# All repositories combined for container URL generation
+_ALL_REPOSITORIES: tuple[tuple[str, str], ...] = (
+    *_STANDARD_REPOSITORIES,
+    *_SPECIAL_REPOSITORIES,
+)
+
+
 @dataclass(slots=True, kw_only=True)
 class RepositoryConfig:
     """Configuration for a specific repository."""
@@ -63,8 +85,12 @@ class RepositoryConfig:
 class ContainerURLsConfig:
     """Configuration for container URLs."""
 
-    default: str
-    options: List[str] = field(default_factory=lambda: cast(List[str], []))
+    default: str = "ghcr.io/wombatfromhell/bazzite-nix:testing"
+    options: List[str] = field(
+        default_factory=lambda: [
+            f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES
+        ]
+    )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -94,19 +120,7 @@ class URHConfig:
         default_factory=lambda: cast(Dict[str, RepositoryConfig], {})
     )
     container_urls: ContainerURLsConfig = field(
-        default_factory=lambda: ContainerURLsConfig(
-            default="ghcr.io/wombatfromhell/bazzite-nix:testing",
-            options=[
-                "ghcr.io/wombatfromhell/bazzite-nix:testing",
-                "ghcr.io/wombatfromhell/bazzite-nix:stable",
-                "ghcr.io/wombatfromhell/bazzite-nvidia-open-nix:stable",
-                "ghcr.io/ublue-os/bazzite:stable",
-                "ghcr.io/ublue-os/bazzite:testing",
-                "ghcr.io/ublue-os/bazzite-nvidia-open:stable",
-                "ghcr.io/ublue-os/bazzite-nvidia-open:testing",
-                "ghcr.io/astrovm/amyos:latest",
-            ],
-        )
+        default_factory=lambda: ContainerURLsConfig()
     )
     settings: SettingsConfig = field(default_factory=lambda: SettingsConfig())
 
@@ -171,20 +185,13 @@ class URHConfig:
         config = cls()
 
         # Standard repositories with identical configuration
-        standard_repos = [
-            "ublue-os/bazzite",
-            "ublue-os/bazzite-nvidia-open",
-            "wombatfromhell/bazzite-nix",
-            "wombatfromhell/bazzite-nvidia-open-nix",
-        ]
+        for repo_name, _ in _STANDARD_REPOSITORIES:
+            config.repositories[repo_name] = cls._create_standard_repository_config()
 
-        # Create standard repository configurations
-        standard_config = cls._create_standard_repository_config()
-        for repo_name in standard_repos:
-            config.repositories[repo_name] = standard_config
-
-        # Create special astrovm/amyos configuration
-        config.repositories["astrovm/amyos"] = cls._create_amyos_repository_config()
+        # Special repositories with custom configurations
+        for repo_name, _ in _SPECIAL_REPOSITORIES:
+            if repo_name == "astrovm/amyos":
+                config.repositories[repo_name] = cls._create_amyos_repository_config()
 
         return config
 
@@ -507,13 +514,6 @@ class ConfigManager:
             f.write("\n")
 
             # Write standard repositories with shared configuration
-            standard_repos = [
-                "ublue-os/bazzite",
-                "ublue-os/bazzite-nvidia-open",
-                "wombatfromhell/bazzite-nix",
-                "wombatfromhell/bazzite-nvidia-open-nix",
-            ]
-
             # Write comment explaining the standard configuration
             f.write(
                 "# Standard repositories share the same filter patterns and ignore tags\n"
@@ -526,7 +526,7 @@ class ConfigManager:
             f.write("\n")
 
             # Write standard repositories using defaults
-            for repo_name in standard_repos:
+            for repo_name, _ in _STANDARD_REPOSITORIES:
                 f.write("[[repository]]\n")
                 f.write(f'name = "{repo_name}"\n')
                 # Only specify overrides if they differ from defaults
