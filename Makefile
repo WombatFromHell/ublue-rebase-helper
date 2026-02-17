@@ -22,18 +22,19 @@ install: $(OUT)
 	echo "Installed to $$INSTALL_DIR/urh.pyz"
 
 test:
-	uv run pytest -xvs --cov=src --cov-report=term-missing --cov-branch
+	uv run pytest --tb=short --cov=src --cov-report=term-missing --cov-branch
 
 lint:
-	ruff check ./src ./tests; \
-		pyright ./src ./tests
+	uv run ty check ./src ./tests; \
+	uv run ruff check ./src ./tests
 
 prettier:
 	prettier --cache -c -w *.md
 
 format: prettier
-	ruff check --select I ./src ./tests --fix; \
-	ruff format ./src ./tests
+	uv run ruff check --select I ./src ./tests --fix; \
+	uv run ruff check ./src ./tests --fix; \
+	uv run ruff format ./src ./tests
 
 quality: lint format
 
@@ -50,4 +51,5 @@ clean:
 
 all: clean build install
 
-.PHONY: all clean install build test lint format radon
+.PHONY: all clean install build test lint prettier format radon
+.SILENT: all clean install build test lint prettier format radon

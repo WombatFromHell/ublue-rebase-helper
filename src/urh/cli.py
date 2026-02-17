@@ -9,7 +9,7 @@ import sys
 from .commands import CommandRegistry
 from .config import get_config
 from .deployment import format_deployment_header, get_current_deployment_info
-from .menu import MenuExitException, _menu_system
+from .menu import MenuExitException
 from .system import check_curl_presence
 
 
@@ -21,10 +21,8 @@ def setup_logging(debug: bool = False) -> None:
     )
 
 
-def _main_menu_loop() -> None:
+def _main_menu_loop(registry: CommandRegistry) -> None:
     """Main menu functionality that shows the menu and executes commands."""
-    registry = CommandRegistry()
-
     # Get current deployment info for persistent header
     deployment_info_header = get_current_deployment_info()
     persistent_header = format_deployment_header(deployment_info_header)
@@ -36,7 +34,7 @@ def _main_menu_loop() -> None:
 
     items = [MenuItem(cmd.name, cmd.description) for cmd in sorted_commands]
 
-    selected = _menu_system.show_menu(
+    selected = registry._menu_system.show_menu(
         items,
         "Select a command (ESC to exit):",
         persistent_header=persistent_header,
@@ -83,7 +81,7 @@ def main():
             # But don't loop infinitely in test environments
             while True:
                 try:
-                    _main_menu_loop()
+                    _main_menu_loop(registry)
                     # If in test environment, break after one iteration
                     if in_test_environment:
                         return

@@ -6,7 +6,7 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
 from .models import GumCommand, MenuItem
 
@@ -25,8 +25,26 @@ class MenuExitException(Exception):
 class MenuSystem:
     """Unified menu system using native Python."""
 
-    def __init__(self):
-        self.is_tty = os.isatty(1)
+    def __init__(
+        self,
+        is_tty: Optional[bool] = None,
+        subprocess_runner: Optional[Callable] = None,
+        input_func: Optional[Callable[[str], str]] = None,
+        exit_func: Optional[Callable[[int], None]] = None,
+    ):
+        """
+        Initialize MenuSystem with optional dependency injection for testability.
+
+        Args:
+            is_tty: Whether we're in a TTY environment (default: auto-detect)
+            subprocess_runner: subprocess.run replacement (default: subprocess.run)
+            input_func: input() replacement (default: built-in input)
+            exit_func: sys.exit replacement (default: sys.exit)
+        """
+        self.is_tty = is_tty if is_tty is not None else os.isatty(1)
+        self._subprocess_runner = subprocess_runner or subprocess.run
+        self._input_func = input_func or input
+        self._exit_func = exit_func or sys.exit
 
     def show_menu(
         self,
@@ -106,7 +124,7 @@ class MenuSystem:
         self, gum_cmd: GumCommand
     ) -> subprocess.CompletedProcess[str]:
         """Execute the gum command and return the result."""
-        return subprocess.run(
+        return self._subprocess_runner(
             gum_cmd.build(),
             text=True,
             stdout=subprocess.PIPE,
@@ -205,7 +223,7 @@ class MenuSystem:
 
     def _get_user_choice(self) -> str:
         """Get user choice input."""
-        return input("\nEnter choice (number): ").strip()
+        return self._input_func("\nEnter choice (number): ").strip()
 
     def _parse_choice_number(self, choice: str, items: Sequence[MenuItem]) -> int:
         """Parse and validate the choice number."""
@@ -231,7 +249,7 @@ class MenuSystem:
     def _handle_keyboard_interrupt(self, is_main_menu: bool) -> Optional[Any]:
         """Handle keyboard interrupt (ESC)."""
         if is_main_menu:
-            sys.exit(0)
+            self._exit_func(0)
         else:
             return None
 

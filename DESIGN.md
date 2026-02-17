@@ -220,6 +220,44 @@ The `CommandDefinition` dataclass with `__slots__` and `kw_only=True` defines co
 - **Exit Code Handling**: Properly handles exit codes from underlying system commands using `sys.exit()`
 - **Error Handling**: Includes validation for numeric arguments to prevent command injection and provides user-friendly error messages
 
+### Dependency Injection Architecture
+
+The codebase uses dependency injection (DI) to enable testability without mocking business logic. External dependencies are injected at construction time, allowing tests to provide mock implementations while production code uses defaults.
+
+- **MenuSystem Injection**: The `CommandRegistry` accepts an optional `menu_system` parameter in its constructor. When not provided, it creates a default `MenuSystem()` instance. This allows tests to inject a mock menu system without patching at import location.
+- **CLI Integration**: The `cli.py` module uses the `CommandRegistry` with its default MenuSystem, but tests can create a `CommandRegistry` with an injected mock MenuSystem for isolated testing.
+- **Protocol-Based DI**: Uses `typing.Protocol` classes to define injectable interfaces (`TokenProvider`, `HTTPClient`, `MenuProvider`, `FileReader`) enabling flexible mock implementations in tests.
+- **Backward Compatibility**: All DI parameters have sensible defaults, ensuring existing code continues to work without modification.
+- **Test Fixtures**: The `conftest.py` provides factory fixtures (`mock_menu_provider`, `mock_token_provider`, `mock_file_reader`) for creating injectable mock implementations.
+
+#### Example: MenuSystem Injection
+
+```python
+# Production code (default behavior)
+registry = CommandRegistry()  # Creates internal MenuSystem
+
+# Test code (injected mock)
+mock_menu = mocker.MagicMock()
+mock_menu.show_menu.return_value = "selected"
+registry = CommandRegistry(menu_system=mock_menu)
+```
+
+#### Example: Protocol Definition
+
+```python
+from typing import Protocol
+
+class MenuProvider(Protocol):
+    """Protocol for injectable menu providers."""
+    def show_menu(
+        self,
+        items: Sequence[MenuItem],
+        header: str,
+        persistent_header: str | None = None,
+        is_main_menu: bool = False,
+    ) -> Any: ...
+```
+
 ### Command Execution
 
 All commands are executed using `run_command()` with proper error handling and timeout protection. The utility returns the exit code from the underlying commands to maintain proper exit status behavior. The `run_command` function includes:
@@ -334,7 +372,7 @@ Commands that modify the system state require elevated privileges using `sudo`. 
 
 The conditional sudo mechanism provides fine-grained control over when commands require elevated privileges:
 
-- **SudoConditionFunc Type**: Uses `SudoConditionFunc` type alias (Callable[[List[str]], bool]) for functions that determine sudo requirements based on arguments
+- **SudoConditionFunc Type**: Uses `SudoConditionFunc` type alias (`Callable[[List[str]], bool]`) for functions that determine sudo requirements based on arguments
 - **CommandDefinition Integration**: The `CommandDefinition` dataclass includes a `conditional_sudo_func` field that accepts functions to determine sudo requirements dynamically
 - **run_command_with_conditional_sudo**: This function handles the execution logic and determines whether sudo is needed based on either static `requires_sudo` boolean or dynamic `conditional_sudo_func`
 - **kargs Command Example**: The `kargs` command uses conditional sudo - requires sudo for modification operations but not for read-only operations like `--help`
@@ -411,6 +449,7 @@ The MenuSystem supports multiple interface modes:
 - **Menu System Loop**: Implements main menu loop with ESC handling to return to main menu after submenu ESC
 - **Main Menu Loop Behavior**: The main menu runs in a continuous loop that shows the main menu after submenu ESC is pressed, creating a natural workflow where users can navigate between submenus and the main menu seamlessly
 - **Non-TTY Mode Behavior**: In non-TTY environments (like when output is piped), the menu system displays available options and shows a message indicating how to run the tool with a specific option
+- **Dependency Injection Support**: The MenuSystem can be injected into CommandRegistry via the `menu_system` parameter, enabling testability without mocking. Uses `MenuProvider` Protocol for type-safe injection.
 
 ### Modern Python 3.11+ Features
 

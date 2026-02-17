@@ -474,7 +474,7 @@ class OCIClient:
             if not self._validate_parse_result(parse_result):
                 return None, None
 
-            status_line, body, headers = parse_result  # type: ignore[assignment]
+            status_line, body, headers = parse_result
 
             if status_line:
                 self._log_http_status(status_line)

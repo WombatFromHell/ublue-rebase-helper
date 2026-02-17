@@ -18,7 +18,7 @@ from typing import (
 )
 from typing import Optional as OptionalType
 
-from .menu import MenuExitException, _menu_system
+from .menu import MenuExitException, MenuSystem, _menu_system
 from .oci_client import OCIClient
 from .system import ensure_ostree_prefix
 
@@ -176,7 +176,8 @@ class ArgumentParser(Generic[T]):
 class CommandRegistry:
     """Registry for all available commands."""
 
-    def __init__(self):
+    def __init__(self, menu_system: Optional[MenuSystem] = None):
+        self._menu_system = menu_system or _menu_system
         self._commands: Dict[str, CommandDefinition] = {}
         self._register_commands()
 
@@ -337,7 +338,7 @@ class CommandRegistry:
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
 
-                selected = _menu_system.show_menu(
+                selected = self._menu_system.show_menu(
                     items,
                     "Select container image (ESC to cancel):",
                     persistent_header=persistent_header,
@@ -395,7 +396,7 @@ class CommandRegistry:
         deployment_info_header = get_current_deployment_info()
         persistent_header = format_deployment_header(deployment_info_header)
 
-        selected = _menu_system.show_menu(
+        selected = self._menu_system.show_menu(
             items,
             "Select container image (ESC to cancel):",
             persistent_header=persistent_header,
@@ -549,7 +550,7 @@ class CommandRegistry:
         persistent_header = self._get_deployment_header()
 
         # Show menu and get selection
-        selected = _menu_system.show_menu(
+        selected = self._menu_system.show_menu(
             items,
             "Select deployment to pin (ESC to cancel):",
             persistent_header=persistent_header,
@@ -640,7 +641,7 @@ class CommandRegistry:
         deployment_info_header = get_current_deployment_info()
         persistent_header = format_deployment_header(deployment_info_header)
 
-        selected = _menu_system.show_menu(
+        selected = self._menu_system.show_menu(
             items,
             "Select deployment to unpin (ESC to cancel):",
             persistent_header=persistent_header,
@@ -683,7 +684,7 @@ class CommandRegistry:
                 deployment_info_header = get_current_deployment_info()
                 persistent_header = format_deployment_header(deployment_info_header)
 
-                selected = _menu_system.show_menu(
+                selected = self._menu_system.show_menu(
                     items,
                     "Select deployment to remove (ESC to cancel):",
                     persistent_header=persistent_header,
@@ -799,7 +800,7 @@ class CommandRegistry:
         persistent_header = self._get_deployment_header()
 
         while True:  # Loop to return to selection if user cancels
-            selected = _menu_system.show_menu(
+            selected = self._menu_system.show_menu(
                 items,
                 "Select deployment to undeploy (ESC to cancel):",
                 persistent_header=persistent_header,
@@ -825,7 +826,7 @@ class CommandRegistry:
                     selected_deployment
                 )
 
-                confirmation = _menu_system.show_menu(
+                confirmation = self._menu_system.show_menu(
                     confirmation_items,
                     confirmation_header,
                     persistent_header=persistent_header,
