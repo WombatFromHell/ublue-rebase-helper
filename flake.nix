@@ -2,7 +2,7 @@
   description = "Bitwise-deterministic reproducible builds for ublue-rebase-helper";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -25,12 +25,22 @@
         devShells.default = pkgs.mkShell {
           name = "urh";
 
-          packages = [
+          buildInputs = [
             python
-            pkgs.gnumake
-            pkgs.zip # Needed for deterministic zipping
-            pkgs.coreutils # For 'touch' and 'date'
-            pkgs.jq # For JSON parsing in Makefile
+            pkgs.uv
+            pkgs.zip
+            pkgs.rsync
+            pkgs.gnused
+            pkgs.gnugrep
+            pkgs.coreutils
+            pkgs.gnutar
+            pkgs.which
+            pkgs.gawk
+            pkgs.jq
+            pkgs.util-linux # provides readlink, blockdev, etc.
+            pkgs.git # git commands in shell hooks
+            pkgs.less # pager
+            pkgs.findutils # find, locate, updatedb
           ];
           shellHook = ''
             export PYTHON=${python}/bin/python3
