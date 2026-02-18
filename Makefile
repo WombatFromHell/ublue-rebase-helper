@@ -26,14 +26,13 @@ test:
 
 lint:
 	uv run ty check ./src ./tests; \
-	uv run ruff check ./src ./tests
+	uv run ruff check ./src ./tests --fix
 
 prettier:
-	prettier --cache -c -w *.md
+	uv run prettier -c -w *.md
 
 format: prettier
 	uv run ruff check --select I ./src ./tests --fix; \
-	uv run ruff check ./src ./tests --fix; \
 	uv run ruff format ./src ./tests
 
 quality: lint format

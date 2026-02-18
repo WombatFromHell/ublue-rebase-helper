@@ -121,6 +121,15 @@ wheels = [
 ]
 
 [[package]]
+name = "prettier"
+version = "0.0.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/0e/a3375ca8f83f03662f22cbfee801badc4e4da19e4c06ade5ccfab4297678/prettier-0.0.7.tar.gz", hash = "sha256:6c34b8cd09fd9c8956c05d6395ea3f575e0122dce494ba57685c07065abed427", size = 16124, upload-time = "2022-04-27T09:06:51.62Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/cf/c401d2af75c2c271375bbe3654e408af2c296650f88b8b3d3942e3c8b63e/prettier-0.0.7-py3-none-any.whl", hash = "sha256:20e76791de41cafe481328dd49552303f29ca192151cee1b120c26f66cae9bfc", size = 16260, upload-time = "2022-04-27T09:06:50.104Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.19.2"
 source = { registry = "https://pypi.org/simple" }
@@ -271,6 +280,7 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "prettier" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -284,6 +294,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "prettier", specifier = ">=0.0.7" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
