@@ -3,9 +3,23 @@ SRC_DIR = src
 BUILD_DIR = dist
 ENTRY = entry:main
 OUT = $(BUILD_DIR)/urh.pyz
+VERSION_FILE = $(SRC_DIR)/urh/constants.py
 
-build:
+# Extract version from pyproject.toml
+VERSION := $(shell grep '^version = ' pyproject.toml | cut -d'"' -f2)
+
+clean:
+	find . -type d -name "__pycache__" -exec rm -rf {} +; \
+	rm -rf \
+	$(BUILD_DIR) \
+	.pytest_cache \
+	.ruff_cache \
+	.coverage
+
+build: clean
 	mkdir -p $(BUILD_DIR)
+	# Inject version into constants.py
+	sed -i 's/^__version__ = .*/__version__ = "$(VERSION)"/' $(VERSION_FILE)
 	$(PY) -m zipapp $(SRC_DIR) -o $(OUT) -m $(ENTRY) -p "/usr/bin/env python3"
 	chmod +x $(OUT)
 
@@ -39,14 +53,6 @@ quality: lint format
 
 radon:
 	uv run radon cc ./src/urh/ -a
-
-clean:
-	find . -type d -name "__pycache__" -exec rm -rf {} +; \
-	rm -rf \
-		$(BUILD_DIR) \
-		.pytest_cache \
-		.ruff_cache \
-		.coverage
 
 all: clean build install
 

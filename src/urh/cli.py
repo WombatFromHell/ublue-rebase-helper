@@ -8,6 +8,7 @@ import sys
 
 from .commands import CommandRegistry
 from .config import get_config
+from .constants import __version__
 from .deployment import format_deployment_header, get_current_deployment_info
 from .menu import MenuExitException
 from .system import check_curl_presence
@@ -56,6 +57,23 @@ def main():
     """
     Main entry point for the CLI.
     """
+    # Handle --version/-V and --help/-h flags
+    if len(sys.argv) == 2:
+        if sys.argv[1] in ("--version", "-V"):
+            print(f"ublue-rebase-helper v{__version__}")
+            sys.exit(0)
+        if sys.argv[1] in ("--help", "-h"):
+            print(f"ublue-rebase-helper v{__version__}")
+            print("\nUsage: urh [command] [options]")
+            print("\nAvailable commands:")
+            registry = CommandRegistry()
+            for cmd in registry.get_commands():
+                print(f"  {cmd.name} - {cmd.description}")
+            print("\nOptions:")
+            print("  --version, -V  Show version information")
+            print("  --help, -h     Show this help message")
+            sys.exit(0)
+
     # Setup logging based on config
     config = get_config()
     setup_logging(debug=config.settings.debug_mode)
@@ -106,9 +124,14 @@ def main():
                 command.handler(sys.argv[2:])
             else:
                 print(f"Unknown command: {command_name}")
+                print(f"\nublue-rebase-helper v{__version__}")
+                print("\nUsage: urh [command] [options]")
                 print("\nAvailable commands:")
                 for cmd in registry.get_commands():
                     print(f"  {cmd.name} - {cmd.description}")
+                print("\nOptions:")
+                print("  --version, -V  Show version information")
+                print("  --help, -h     Show this help message")
                 sys.exit(1)
 
     # Return successful exit code
