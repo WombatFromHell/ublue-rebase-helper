@@ -1,20 +1,52 @@
-# AGENTS.md - Tool Usage Guide for Agentic Tools
+# AGENTS.md
 
-## Development Environment Tools
+## Development Environment
 
-### Testing Tools
+```bash
+nix develop    # or: direnv allow
+```
 
-- `make test` - Full test suite with coverage reporting
+Provides: Python 3.13, zip, coreutils, gnumake, jq + fixed `SOURCE_DATE_EPOCH`
 
-### Code Quality Tools
+## Quick Reference
 
-- `make quality` - Code linting/formatting checks
-- `make radon` - Code complexity analysis
+| Task         | Command                             |
+| ------------ | ----------------------------------- |
+| Setup        | `nix develop`                       |
+| Test         | `make test` or `uv run pytest -xvs` |
+| Quality      | `make quality`                      |
+| Build        | `make build`                        |
+| Install      | `make install`                      |
+| Dependencies | `uv add/remove ...`                 |
 
-## Agent Workflow
+## Makefile Targets
 
-1. **Testing**: Use `uv run pytest -xvs` for test execution
-2. **Quality Checks**: Run `make quality` before commits to validate linting/formatting
-3. **Complexity Analysis**: Use `make radon` for refactoring code complexity validation
-4. Building and Deployment: Use `make all` to clean, build, and install locally to `~/.local/bin/urh`
-5. **Dependency Management**: Use `uv` for package operations
+| Target    | Description                    |
+| --------- | ------------------------------ |
+| `build`   | Deterministic zipapp           |
+| `install` | Install to `~/.local/bin/urh`  |
+| `clean`   | Remove build artifacts         |
+| `test`    | Pytest with coverage           |
+| `quality` | Lint + format checks           |
+| `lint`    | Type check (ty) + ruff         |
+| `format`  | Ruff + prettier                |
+| `radon`   | Code complexity analysis       |
+
+## Build Output
+
+```
+dist/
+├── urh.pyz           # Executable zipapp
+└── urh.pyz.sha256sum # Checksum
+```
+
+## Reproducibility
+
+Builds are bitwise-identical via:
+1. Fixed timestamps (`SOURCE_DATE_EPOCH`)
+2. Sorted file order (`LC_ALL=C sort`)
+3. Stripped metadata (`zip -X`)
+4. Staging isolation
+5. Pinned toolchain (Nix)
+
+See [REPRODUCIBLE_BUILDS.md](REPRODUCIBLE_BUILDS.md) for details.

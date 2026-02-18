@@ -1,8 +1,13 @@
 .ruff_cache
 .pytest_cache
 .venv
+.direnv
 .build
 __pycache__
 dist
 
 .coverage
+
+# Deterministic build staging
+staging
+archive.zip
