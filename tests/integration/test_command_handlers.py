@@ -181,6 +181,13 @@ class TestRebaseCommand:
         mock_config.container_urls.options = ["ghcr.io/test/repo:stable"]
         mocker.patch("src.urh.config.get_config", return_value=mock_config)
 
+        # Mock deployment info to avoid rpm-ostree calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test-repo", "version": "1.0.0"},
+        )
+        mocker.patch("src.urh.deployment.format_menu_header", return_value="Test Header")
+
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -219,6 +226,13 @@ class TestRemoteLsCommand:
         mock_config = mocker.MagicMock()
         mock_config.container_urls.options = ["ghcr.io/test/repo:stable"]
         mocker.patch("src.urh.config.get_config", return_value=mock_config)
+
+        # Mock deployment info to avoid rpm-ostree calls
+        mocker.patch(
+            "src.urh.deployment.get_current_deployment_info",
+            return_value={"repository": "test-repo", "version": "1.0.0"},
+        )
+        mocker.patch("src.urh.deployment.format_menu_header", return_value="Test Header")
 
         mock_client_class = mocker.patch("src.urh.commands.OCIClient")
         mock_client = mocker.MagicMock()
