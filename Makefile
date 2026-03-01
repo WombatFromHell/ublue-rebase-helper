@@ -97,7 +97,7 @@ lint:
 	uv run ruff check ./src ./tests --fix
 
 prettier:
-	uv run prettier -c -w *.md
+	prettier -c -w *.md
 
 format: prettier
 	uv run ruff check --select I ./src ./tests --fix; \

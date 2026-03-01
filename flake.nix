@@ -33,6 +33,7 @@
             pkgs.gnused
             pkgs.gnugrep
             pkgs.coreutils
+            pkgs.prettier
             pkgs.gnutar
             pkgs.which
             pkgs.gawk
