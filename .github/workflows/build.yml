@@ -23,7 +23,7 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           # Enable flakes and nix-command for modern Nix usage
-          extra_conf: |
+          extra_nix_config: |
             experimental-features = nix-command flakes
 
       - name: Build Release Artifact
