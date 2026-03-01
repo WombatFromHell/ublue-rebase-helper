@@ -30,6 +30,10 @@ clean:
 	.coverage \
 	.direnv
 
+configure:
+	uv venv --clear
+	uv sync --frozen
+
 build: clean
 	@echo "Building $(ARTIFACT) (version $(VERSION))"
 	@echo "SOURCE_DATE_EPOCH: $(SOURCE_DATE_EPOCH) ($(TIMESTAMP))"
@@ -104,7 +108,9 @@ quality: lint format
 radon:
 	uv run radon cc ./src/urh/ -a
 
-all: clean build install
+ci: configure quality test build
 
-.PHONY: all clean install build test lint prettier format radon
-.SILENT: all clean install build test lint prettier format radon
+all: build install
+
+.PHONY: all clean install build test lint prettier format radon configure ci
+.SILENT: all clean install build test lint prettier format radon configure ci
