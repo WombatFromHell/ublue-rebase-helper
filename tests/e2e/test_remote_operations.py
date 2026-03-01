@@ -24,11 +24,11 @@ class TestRemoteLsCommand:
         """Setup test environment for remote-ls tests."""
         # Mock deployment info for header
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test-repo (1.0.0)",
         )
 
@@ -157,11 +157,11 @@ class TestOCIClientIntegration:
     def setup_oci_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for OCI client integration tests."""
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test-repo (1.0.0)",
         )
         mocker.patch("os.isatty", return_value=True)
@@ -202,11 +202,11 @@ class TestTokenManagerIntegration:
     def setup_token_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for token manager tests."""
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test-repo (1.0.0)",
         )
         mocker.patch("os.isatty", return_value=True)

@@ -28,11 +28,11 @@ class TestMainMenuNavigation:
         """Setup common test environment for menu navigation tests."""
         # Mock deployment info at cli.py level (where functions are imported)
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test-repo (1.0.0)",
         )
 
@@ -104,11 +104,11 @@ class TestSubmenuNavigation:
         """Setup test environment for submenu tests."""
         # Mock deployment info at cli.py level
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test-repo (1.0.0)",
         )
 
@@ -226,13 +226,13 @@ class TestDeploymentSelectionMenus:
     @pytest.fixture(autouse=True)
     def setup_deployment_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for deployment menu tests."""
-        # Mock deployment info at cli.py level
+        # Mock deployment info at deployment.py level
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: test-repo (1.0.0)",
         )
 
@@ -529,11 +529,11 @@ class TestMenuHeaderDisplay:
         """Setup test environment for header tests."""
         # Mock deployment info at cli.py level with default values
         mocker.patch(
-            "src.urh.cli.get_current_deployment_info",
+            "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "bazzite-nix", "version": "42.20231115.0"},
         )
         mocker.patch(
-            "src.urh.cli.format_deployment_header",
+            "src.urh.deployment.format_deployment_header",
             return_value="Current deployment: bazzite-nix (42.20231115.0)",
         )
 
