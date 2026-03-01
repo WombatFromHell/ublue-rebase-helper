@@ -5,6 +5,7 @@ This document describes the reproducible build strategy for **ublue-rebase-helpe
 ## Overview
 
 The build system produces a deterministic Python zipapp (`dist/urh.pyz`) that is bitwise-identical when built from the same source commit, regardless of:
+
 - When the build is performed
 - Where the build is performed (different machines)
 - Who performs the build
@@ -33,6 +34,7 @@ All file timestamps are normalized to a fixed epoch time to eliminate build-time
   ```
 
 Implementation:
+
 ```makefile
 SOURCE_DATE_EPOCH ?= 315532800
 export SOURCE_DATE_EPOCH
@@ -96,6 +98,7 @@ make build
 ```
 
 The `.envrc` file automatically:
+
 - Sets up the Nix development shell
 - Exports `SOURCE_DATE_EPOCH`
 - Configures `PYTHON` environment variable
@@ -103,6 +106,7 @@ The `.envrc` file automatically:
 ### Manual Setup (Not Recommended)
 
 If not using Nix, ensure you have:
+
 - Python 3.13
 - GNU Make
 - zip (with `-X` support)
@@ -110,6 +114,7 @@ If not using Nix, ensure you have:
 - jq
 
 And manually set:
+
 ```bash
 export SOURCE_DATE_EPOCH=315532800
 ```
@@ -130,14 +135,14 @@ export SOURCE_DATE_EPOCH=315532800
 
 ### Makefile Targets
 
-| Target    | Description                                          |
-| --------- | ---------------------------------------------------- |
-| `build`   | Create deterministic zipapp (`dist/urh.pyz`)         |
-| `install` | Install to `~/.local/bin/urh`                        |
-| `all`     | Clean + build + install                              |
-| `clean`   | Remove build artifacts and caches                    |
-| `test`    | Run pytest with coverage                             |
-| `quality` | Run lint and format checks                           |
+| Target    | Description                                  |
+| --------- | -------------------------------------------- |
+| `build`   | Create deterministic zipapp (`dist/urh.pyz`) |
+| `install` | Install to `~/.local/bin/urh`                |
+| `all`     | Clean + build + install                      |
+| `clean`   | Remove build artifacts and caches            |
+| `test`    | Run pytest with coverage                     |
+| `quality` | Run lint and format checks                   |
 
 ## Verification
 
@@ -205,17 +210,20 @@ Example GitHub Actions snippet:
 If builds are not reproducible:
 
 1. **Check SOURCE_DATE_EPOCH**:
+
    ```bash
    echo $SOURCE_DATE_EPOCH  # Should be set
    date -d "@$SOURCE_DATE_EPOCH" -u
    ```
 
 2. **Verify Clean Build**:
+
    ```bash
    make clean && make build
    ```
 
 3. **Check File Ordering**:
+
    ```bash
    cd dist/staging && find . -type f | LC_ALL=C sort
    ```

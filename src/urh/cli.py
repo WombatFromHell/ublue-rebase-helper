@@ -8,8 +8,11 @@ import sys
 
 from .commands import CommandRegistry
 from .config import get_config
-from .constants import __version__
-from .deployment import format_deployment_header, get_current_deployment_info
+from .constants import __version__, format_version_header
+from .deployment import (
+    format_menu_header,
+    get_current_deployment_info,
+)
 from .menu import MenuExitException
 from .system import check_curl_presence
 
@@ -25,8 +28,9 @@ def setup_logging(debug: bool = False) -> None:
 def _main_menu_loop(registry: CommandRegistry) -> None:
     """Main menu functionality that shows the menu and executes commands."""
     # Get current deployment info for persistent header
-    deployment_info_header = get_current_deployment_info()
-    persistent_header = format_deployment_header(deployment_info_header)
+    deployment_info = get_current_deployment_info()
+    version_header = format_version_header()
+    persistent_header = format_menu_header(version_header, deployment_info)
 
     commands = registry.get_commands()
     # Sort commands alphabetically by name for better organization

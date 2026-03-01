@@ -18,6 +18,7 @@ from typing import (
 )
 from typing import Optional as OptionalType
 
+from .constants import format_version_header
 from .menu import MenuExitException, MenuSystem, _menu_system
 from .oci_client import OCIClient
 from .system import ensure_ostree_prefix
@@ -330,13 +331,12 @@ class CommandRegistry:
                 items = [ListItem("", url, url) for url in options]
 
                 # Get current deployment info for persistent header
-                from .deployment import (
-                    format_deployment_header,
-                    get_current_deployment_info,
-                )
+                from .deployment import format_menu_header, get_current_deployment_info
 
-                deployment_info_header = get_current_deployment_info()
-                persistent_header = format_deployment_header(deployment_info_header)
+                deployment_info = get_current_deployment_info()
+                persistent_header = format_menu_header(
+                    format_version_header(), deployment_info
+                )
 
                 selected = self._menu_system.show_menu(
                     items,
@@ -385,7 +385,7 @@ class CommandRegistry:
 
     def _select_url_for_remote_ls(self, config) -> Optional[str]:
         """Show menu to select URL for remote-ls."""
-        from .deployment import format_deployment_header, get_current_deployment_info
+        from .deployment import format_menu_header, get_current_deployment_info
         from .models import ListItem
 
         # Show submenu using ListItem instead of MenuItem
@@ -393,8 +393,8 @@ class CommandRegistry:
         items = [ListItem("", url, url) for url in options]
 
         # Get current deployment info for persistent header
-        deployment_info_header = get_current_deployment_info()
-        persistent_header = format_deployment_header(deployment_info_header)
+        deployment_info = get_current_deployment_info()
+        persistent_header = format_menu_header(format_version_header(), deployment_info)
 
         selected = self._menu_system.show_menu(
             items,
@@ -514,13 +514,6 @@ class CommandRegistry:
             for d in all_deployments
         ]
 
-    def _get_deployment_header(self) -> str:
-        """Get current deployment info for persistent header."""
-        from .deployment import format_deployment_header, get_current_deployment_info
-
-        deployment_info_header = get_current_deployment_info()
-        return format_deployment_header(deployment_info_header)
-
     def _validate_deployment_not_pinned(
         self, deployments: List, selected_index: int
     ) -> bool:
@@ -546,8 +539,14 @@ class CommandRegistry:
         # Create menu items
         items = self._create_deployment_menu_items(deployments)
 
-        # Get persistent header
-        persistent_header = self._get_deployment_header()
+        # Get persistent header with version and deployment info
+        from .deployment import (
+            format_menu_header,
+            get_current_deployment_info,
+        )
+
+        deployment_info = get_current_deployment_info()
+        persistent_header = format_menu_header(format_version_header(), deployment_info)
 
         # Show menu and get selection
         selected = self._menu_system.show_menu(
@@ -618,7 +617,10 @@ class CommandRegistry:
 
     def _select_deployment_to_unpin(self, deployments: List) -> Optional[int]:
         """Show menu to select deployment for unpinning."""
-        from .deployment import format_deployment_header, get_current_deployment_info
+        from .deployment import (
+            format_menu_header,
+            get_current_deployment_info,
+        )
         from .models import ListItem
 
         # Show only pinned deployments
@@ -638,8 +640,8 @@ class CommandRegistry:
         ]
 
         # Get current deployment info for persistent header
-        deployment_info_header = get_current_deployment_info()
-        persistent_header = format_deployment_header(deployment_info_header)
+        deployment_info = get_current_deployment_info()
+        persistent_header = format_menu_header(format_version_header(), deployment_info)
 
         selected = self._menu_system.show_menu(
             items,
@@ -676,13 +678,12 @@ class CommandRegistry:
                 ][::-1]
 
                 # Get current deployment info for persistent header
-                from .deployment import (
-                    format_deployment_header,
-                    get_current_deployment_info,
-                )
+                from .deployment import format_menu_header, get_current_deployment_info
 
-                deployment_info_header = get_current_deployment_info()
-                persistent_header = format_deployment_header(deployment_info_header)
+                deployment_info = get_current_deployment_info()
+                persistent_header = format_menu_header(
+                    format_version_header(), deployment_info
+                )
 
                 selected = self._menu_system.show_menu(
                     items,
@@ -796,8 +797,14 @@ class CommandRegistry:
         # Create menu items using existing helper
         items = self._create_deployment_menu_items(deployments)
 
-        # Get persistent header using existing helper
-        persistent_header = self._get_deployment_header()
+        # Get persistent header with version and deployment info
+        from .deployment import (
+            format_menu_header,
+            get_current_deployment_info,
+        )
+
+        deployment_info = get_current_deployment_info()
+        persistent_header = format_menu_header(format_version_header(), deployment_info)
 
         while True:  # Loop to return to selection if user cancels
             selected = self._menu_system.show_menu(

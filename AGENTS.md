@@ -21,16 +21,16 @@ Provides: Python 3.13, zip, coreutils, gnumake, jq + fixed `SOURCE_DATE_EPOCH`
 
 ## Makefile Targets
 
-| Target    | Description                    |
-| --------- | ------------------------------ |
-| `build`   | Deterministic zipapp           |
-| `install` | Install to `~/.local/bin/urh`  |
-| `clean`   | Remove build artifacts         |
-| `test`    | Pytest with coverage           |
-| `quality` | Lint + format checks           |
-| `lint`    | Type check (ty) + ruff         |
-| `format`  | Ruff + prettier                |
-| `radon`   | Code complexity analysis       |
+| Target    | Description                   |
+| --------- | ----------------------------- |
+| `build`   | Deterministic zipapp          |
+| `install` | Install to `~/.local/bin/urh` |
+| `clean`   | Remove build artifacts        |
+| `test`    | Pytest with coverage          |
+| `quality` | Lint + format checks          |
+| `lint`    | Type check (ty) + ruff        |
+| `format`  | Ruff + prettier               |
+| `radon`   | Code complexity analysis      |
 
 ## Build Output
 
@@ -43,6 +43,7 @@ dist/
 ## Reproducibility
 
 Builds are bitwise-identical via:
+
 1. Fixed timestamps (`SOURCE_DATE_EPOCH`)
 2. Sorted file order (`LC_ALL=C sort`)
 3. Stripped metadata (`zip -X`)

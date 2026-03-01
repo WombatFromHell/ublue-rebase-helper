@@ -202,3 +202,22 @@ def format_deployment_header(deployment_info: Optional[Dict[str, str]]) -> str:
     version = deployment_info["version"]
 
     return f"Current deployment: {repository} ({version})"
+
+
+def format_menu_header(
+    version_header: str, deployment_info: Optional[Dict[str, str]]
+) -> str:
+    """Format a complete menu header with version and deployment info.
+
+    Creates a well-organized header with visual separation:
+    - App version at top
+    - Separator line
+    - Current deployment info
+    - Another separator line
+    """
+    from .constants import format_menu_separator
+
+    deployment_header = format_deployment_header(deployment_info)
+    separator = format_menu_separator()
+
+    return f"{version_header}\n{separator}\n{deployment_header}\n{separator}"
