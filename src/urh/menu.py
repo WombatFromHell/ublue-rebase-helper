@@ -254,5 +254,20 @@ class MenuSystem:
             return None
 
 
+def get_user_input(prompt: str) -> str:
+    """Get user input with a prompt.
+
+    This function is a wrapper around the built-in input() function
+    and can be mocked in tests for better testability.
+
+    Args:
+        prompt: The prompt to display to the user
+
+    Returns:
+        The user's input as a string
+    """
+    return input(prompt)
+
+
 # Global menu system instance
 _menu_system = MenuSystem()

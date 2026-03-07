@@ -120,17 +120,17 @@ class TestCLIDirectCommandExecution:
         finally:
             sys.argv = original_argv
 
-    def test_kargs_command_no_args_no_sudo(self, mocker: MockerFixture) -> None:
-        """Test kargs command without arguments doesn't use sudo."""
+    def test_kargs_show_subcommand_no_sudo(self, mocker: MockerFixture) -> None:
+        """Test kargs show subcommand doesn't use sudo."""
         mock_run = mocker.patch("subprocess.run")
         mock_run.side_effect = [
             mocker.MagicMock(returncode=0),  # curl check
-            mocker.MagicMock(returncode=0),  # kargs command
+            mocker.MagicMock(returncode=0),  # kargs show command
         ]
         mock_exit = mocker.patch("sys.exit")
 
         original_argv = sys.argv
-        sys.argv = ["urh", "kargs"]
+        sys.argv = ["urh", "kargs", "show"]
 
         try:
             cli_main()
@@ -139,6 +139,155 @@ class TestCLIDirectCommandExecution:
             last_call_args = mock_run.call_args_list[-1][0][0]
             assert last_call_args == ["rpm-ostree", "kargs"]
             assert "sudo" not in last_call_args
+
+            mock_exit.assert_called_once_with(0)
+
+        finally:
+            sys.argv = original_argv
+
+    def test_kargs_append_subcommand_with_sudo(self, mocker: MockerFixture) -> None:
+        """Test kargs append subcommand uses sudo."""
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.side_effect = [
+            mocker.MagicMock(returncode=0),  # curl check
+            mocker.MagicMock(returncode=0),  # kargs append command
+        ]
+        mock_exit = mocker.patch("sys.exit")
+
+        original_argv = sys.argv
+        sys.argv = ["urh", "kargs", "append", "quiet"]
+
+        try:
+            cli_main()
+
+            assert mock_run.call_count >= 2
+            last_call_args = mock_run.call_args_list[-1][0][0]
+            assert last_call_args == [
+                "sudo",
+                "rpm-ostree",
+                "kargs",
+                "--append-if-missing=quiet",
+            ]
+
+            mock_exit.assert_called_once_with(0)
+
+        finally:
+            sys.argv = original_argv
+
+    def test_kargs_delete_subcommand_with_sudo(self, mocker: MockerFixture) -> None:
+        """Test kargs delete subcommand uses sudo."""
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.side_effect = [
+            mocker.MagicMock(returncode=0),  # curl check
+            mocker.MagicMock(returncode=0),  # kargs delete command
+        ]
+        mock_exit = mocker.patch("sys.exit")
+
+        original_argv = sys.argv
+        sys.argv = ["urh", "kargs", "delete", "quiet"]
+
+        try:
+            cli_main()
+
+            assert mock_run.call_count >= 2
+            last_call_args = mock_run.call_args_list[-1][0][0]
+            assert last_call_args == [
+                "sudo",
+                "rpm-ostree",
+                "kargs",
+                "--delete-if-present=quiet",
+            ]
+
+            mock_exit.assert_called_once_with(0)
+
+        finally:
+            sys.argv = original_argv
+
+    def test_kargs_replace_subcommand_with_sudo(self, mocker: MockerFixture) -> None:
+        """Test kargs replace subcommand uses sudo."""
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.side_effect = [
+            mocker.MagicMock(returncode=0),  # curl check
+            mocker.MagicMock(returncode=0),  # kargs replace command
+        ]
+        mock_exit = mocker.patch("sys.exit")
+
+        original_argv = sys.argv
+        sys.argv = ["urh", "kargs", "replace", "loglevel=3"]
+
+        try:
+            cli_main()
+
+            assert mock_run.call_count >= 2
+            last_call_args = mock_run.call_args_list[-1][0][0]
+            assert last_call_args == [
+                "sudo",
+                "rpm-ostree",
+                "kargs",
+                "--replace=loglevel=3",
+            ]
+
+            mock_exit.assert_called_once_with(0)
+
+        finally:
+            sys.argv = original_argv
+
+    def test_kargs_delete_subcommand_multiple_args(self, mocker: MockerFixture) -> None:
+        """Test kargs delete subcommand with multiple arguments."""
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.side_effect = [
+            mocker.MagicMock(returncode=0),  # curl check
+            mocker.MagicMock(returncode=0),  # kargs delete command
+        ]
+        mock_exit = mocker.patch("sys.exit")
+
+        original_argv = sys.argv
+        sys.argv = ["urh", "kargs", "delete", "quiet", "loglevel"]
+
+        try:
+            cli_main()
+
+            assert mock_run.call_count >= 2
+            last_call_args = mock_run.call_args_list[-1][0][0]
+            assert last_call_args == [
+                "sudo",
+                "rpm-ostree",
+                "kargs",
+                "--delete-if-present=quiet",
+                "--delete-if-present=loglevel",
+            ]
+
+            mock_exit.assert_called_once_with(0)
+
+        finally:
+            sys.argv = original_argv
+
+    def test_kargs_delete_subcommand_space_delimited(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test kargs delete subcommand with space-delimited arguments."""
+        mock_run = mocker.patch("subprocess.run")
+        mock_run.side_effect = [
+            mocker.MagicMock(returncode=0),  # curl check
+            mocker.MagicMock(returncode=0),  # kargs delete command
+        ]
+        mock_exit = mocker.patch("sys.exit")
+
+        original_argv = sys.argv
+        sys.argv = ["urh", "kargs", "delete", "quiet loglevel"]
+
+        try:
+            cli_main()
+
+            assert mock_run.call_count >= 2
+            last_call_args = mock_run.call_args_list[-1][0][0]
+            assert last_call_args == [
+                "sudo",
+                "rpm-ostree",
+                "kargs",
+                "--delete-if-present=quiet",
+                "--delete-if-present=loglevel",
+            ]
 
             mock_exit.assert_called_once_with(0)
 

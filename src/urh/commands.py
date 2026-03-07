@@ -46,6 +46,15 @@ class CommandType(StrEnum):
     UPGRADE = "upgrade"
 
 
+class KargsSubcommand(StrEnum):
+    """Enumeration of kargs subcommands."""
+
+    APPEND = "append"
+    DELETE = "delete"
+    REPLACE = "replace"
+    SHOW = "show"
+
+
 @dataclass(slots=True, kw_only=True)
 class CommandDefinition:
     """Definition of a command."""
@@ -293,28 +302,298 @@ class CommandRegistry:
     def _should_use_sudo_for_kargs(self, args: List[str]) -> bool:
         """Determine if sudo should be used for kargs command based on arguments."""
         if not args:
-            return False  # No args case is read-only
+            return False  # No args case is read-only (shows current kargs)
 
         # Check for help flags that are read-only operations
         help_flags = {"--help", "-h", "--help-all"}
         if any(arg in help_flags for arg in args):
             return False
 
-        # Check for other potentially read-only operations (like just listing current)
-        # If args contain only flags for inspection (not modification), return False
-        # For kargs, typically modification operations involve --append, --delete, etc.
-        # while inspection operations like --help don't need sudo
-        return True  # Default to using sudo for any other argument combinations
+        # First argument might be a subcommand
+        if args[0] in {KargsSubcommand.SHOW}:
+            return False
+
+        # All modification subcommands (append, delete, replace) require sudo
+        if args[0] in {
+            KargsSubcommand.APPEND,
+            KargsSubcommand.DELETE,
+            KargsSubcommand.REPLACE,
+        }:
+            return True
+
+        # Legacy mode: if no recognized subcommand, assume it's a direct rpm-ostree kargs argument
+        # Direct modification flags require sudo
+        modification_flags = {
+            "--append",
+            "--append-if-missing",
+            "--delete",
+            "--delete-if-present",
+            "--replace",
+            "--edit",
+        }
+        if any(
+            arg.split("=")[0] in modification_flags or arg in modification_flags
+            for arg in args
+        ):
+            return True
+
+        # Default to no sudo for unknown cases (safer)
+        return False
 
     def _handle_kargs(self, args: List[str]) -> None:
-        """Handle the kargs command."""
-        # Use the general conditional sudo mechanism
-        run_command_with_conditional_sudo(
-            ["rpm-ostree", "kargs"],
-            args,
-            requires_sudo=False,  # This value is ignored when conditional_sudo_func is provided
-            conditional_sudo_func=self._should_use_sudo_for_kargs,
+        """Handle the kargs command with subcommands."""
+        if not args:
+            # No arguments: show submenu for kargs operations
+            try:
+                from .models import ListItem
+
+                items = [
+                    ListItem("show", "Show current kernel arguments (read-only)"),
+                    ListItem(
+                        "append", "Append a kernel argument (--append-if-missing)"
+                    ),
+                    ListItem(
+                        "delete", "Delete a kernel argument (--delete-if-present)"
+                    ),
+                    ListItem("replace", "Replace a kernel argument (--replace)"),
+                ]
+
+                # Get current deployment info for persistent header
+                from .deployment import format_menu_header, get_current_deployment_info
+
+                deployment_info = get_current_deployment_info()
+                persistent_header = format_menu_header(
+                    format_version_header(), deployment_info
+                )
+
+                selected = self._menu_system.show_menu(
+                    items,
+                    "Select kargs operation (ESC to cancel):",
+                    persistent_header=persistent_header,
+                    is_main_menu=False,
+                )
+
+                if selected is None:
+                    return
+
+                # Route to selected subcommand
+                if selected == "show":
+                    self._handle_kargs_show([])
+                elif selected == "append":
+                    self._prompt_and_handle_kargs_append()
+                elif selected == "delete":
+                    self._prompt_and_handle_kargs_delete()
+                elif selected == "replace":
+                    self._prompt_and_handle_kargs_replace()
+            except MenuExitException:
+                # ESC pressed in submenu, return to main menu
+                return
+            return
+
+        # Check for help flags first
+        help_flags = {"--help", "-h", "--help-all"}
+        if any(arg in help_flags for arg in args):
+            cmd = ["rpm-ostree", "kargs"] + args
+            sys.exit(_run_command(cmd))
+            return
+
+        # Parse subcommand
+        subcommand = args[0]
+
+        if subcommand == KargsSubcommand.APPEND:
+            self._handle_kargs_append(args[1:])
+        elif subcommand == KargsSubcommand.DELETE:
+            self._handle_kargs_delete(args[1:])
+        elif subcommand == KargsSubcommand.REPLACE:
+            self._handle_kargs_replace(args[1:])
+        elif subcommand == KargsSubcommand.SHOW:
+            self._handle_kargs_show(args[1:])
+        else:
+            # Legacy mode: pass arguments directly to rpm-ostree kargs
+            run_command_with_conditional_sudo(
+                ["rpm-ostree", "kargs"],
+                args,
+                requires_sudo=False,
+                conditional_sudo_func=self._should_use_sudo_for_kargs,
+            )
+
+    def _prompt_for_karg_value(self, prompt_text: str) -> Optional[str]:
+        """Prompt user for a kernel argument value."""
+        try:
+            from .menu import get_user_input
+
+            return get_user_input(prompt_text)
+        except KeyboardInterrupt:
+            return None
+
+    def _prompt_and_handle_kargs_append(self) -> None:
+        """Prompt for kernel argument and handle append operation."""
+        karg = self._prompt_for_karg_value(
+            "Enter kernel argument (e.g., quiet or loglevel=3): "
         )
+        if karg is None:
+            return
+
+        karg = karg.strip()
+        if not karg:
+            print("Error: No kernel argument provided")
+            sys.exit(1)
+
+        self._handle_kargs_append([karg])
+
+    def _prompt_and_handle_kargs_delete(self) -> None:
+        """Prompt for kernel argument key and handle delete operation."""
+        karg = self._prompt_for_karg_value(
+            "Enter kernel argument key to delete (e.g., quiet): "
+        )
+        if karg is None:
+            return
+
+        karg = karg.strip()
+        if not karg:
+            print("Error: No kernel argument key provided")
+            sys.exit(1)
+
+        self._handle_kargs_delete([karg])
+
+    def _prompt_and_handle_kargs_replace(self) -> None:
+        """Prompt for kernel argument replacement and handle replace operation."""
+        karg = self._prompt_for_karg_value(
+            "Enter kernel argument replacement (e.g., loglevel=3): "
+        )
+        if karg is None:
+            return
+
+        karg = karg.strip()
+        if not karg:
+            print("Error: No kernel argument provided")
+            sys.exit(1)
+
+        self._handle_kargs_replace([karg])
+
+    def _handle_kargs_append(self, args: List[str]) -> None:
+        """Handle kargs append subcommand with support for multiple arguments."""
+        if not args:
+            print("Error: append subcommand requires at least one key=value argument")
+            print("Usage: urh kargs append <key=value> [key=value ...]")
+            print("Example: urh kargs append quiet loglevel=3")
+            sys.exit(1)
+            return
+
+        # Parse arguments: support both separate args and space-delimited in quotes
+        kargs = self._parse_kargs_arguments(args)
+
+        if not kargs:
+            print("Error: No valid kernel arguments provided")
+            sys.exit(1)
+            return
+
+        # Validate each argument
+        for karg in kargs:
+            if "=" not in karg and not karg.replace("_", "").replace("-", "").isalnum():
+                print(f"Error: Invalid kernel argument format: {karg}")
+                print("Usage: urh kargs append <key=value> [key=value ...]")
+                sys.exit(1)
+                return
+
+        # Build command with multiple --append-if-missing flags
+        cmd = ["sudo", "rpm-ostree", "kargs"]
+        for karg in kargs:
+            cmd.append(f"--append-if-missing={karg}")
+
+        sys.exit(_run_command(cmd))
+
+    def _handle_kargs_delete(self, args: List[str]) -> None:
+        """Handle kargs delete subcommand with support for multiple arguments."""
+        if not args:
+            print("Error: delete subcommand requires at least one key argument")
+            print("Usage: urh kargs delete <key> [key ...]")
+            print("Example: urh kargs delete quiet loglevel")
+            sys.exit(1)
+            return
+
+        # Parse arguments: support both separate args and space-delimited in quotes
+        kargs = self._parse_kargs_arguments(args)
+
+        if not kargs:
+            print("Error: No valid kernel arguments provided")
+            sys.exit(1)
+            return
+
+        # Validate each argument
+        for karg in kargs:
+            if not karg.replace("_", "").replace("-", "").isalnum():
+                print(f"Error: Invalid kernel argument key: {karg}")
+                print("Usage: urh kargs delete <key> [key ...]")
+                sys.exit(1)
+                return
+
+        # Build command with multiple --delete-if-present flags
+        cmd = ["sudo", "rpm-ostree", "kargs"]
+        for karg in kargs:
+            cmd.append(f"--delete-if-present={karg}")
+
+        sys.exit(_run_command(cmd))
+
+    def _handle_kargs_replace(self, args: List[str]) -> None:
+        """Handle kargs replace subcommand with support for multiple arguments."""
+        if not args:
+            print("Error: replace subcommand requires at least one old=new argument")
+            print("Usage: urh kargs replace <old=new> [old=new ...]")
+            print("Example: urh kargs replace loglevel=3")
+            sys.exit(1)
+            return
+
+        # Parse arguments: support both separate args and space-delimited in quotes
+        kargs = self._parse_kargs_arguments(args)
+
+        if not kargs:
+            print("Error: No valid kernel arguments provided")
+            sys.exit(1)
+            return
+
+        # Validate each argument (must contain =)
+        for karg in kargs:
+            if "=" not in karg:
+                print(f"Error: Invalid kernel argument format: {karg}")
+                print("Usage: urh kargs replace <old=new> [old=new ...]")
+                sys.exit(1)
+                return
+
+        # Build command with multiple --replace flags
+        cmd = ["sudo", "rpm-ostree", "kargs"]
+        for karg in kargs:
+            cmd.append(f"--replace={karg}")
+
+        sys.exit(_run_command(cmd))
+
+    def _parse_kargs_arguments(self, args: List[str]) -> List[str]:
+        """Parse kernel argument list, supporting space-delimited strings.
+
+        This method handles both:
+        - Multiple separate arguments: ['arg1', 'arg2', 'arg3']
+        - Space-delimited in quotes: ['arg1 arg2 arg3']
+
+        Args:
+            args: List of arguments from command line
+
+        Returns:
+            Flattened list of individual kernel arguments
+        """
+        result = []
+        for arg in args:
+            # Split on whitespace to handle space-delimited arguments
+            parts = arg.split()
+            result.extend(parts)
+        return result
+
+    def _handle_kargs_show(self, args: List[str]) -> None:
+        """Handle kargs show subcommand."""
+        if args:
+            print("Warning: show subcommand does not take arguments")
+
+        cmd = ["rpm-ostree", "kargs"]
+        sys.exit(_run_command(cmd))
 
     def _handle_rebase(self, args: List[str]) -> None:
         """Handle the rebase command."""
