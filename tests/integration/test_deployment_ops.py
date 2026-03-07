@@ -192,6 +192,14 @@ class TestGetCurrentDeploymentInfo:
 class TestGetDeploymentInfo:
     """Test get_deployment_info function (subprocess integration)."""
 
+    @pytest.fixture(autouse=True)
+    def setup_deployment_mocks(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
+        """Setup mocks for deployment info tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
     def test_get_deployment_info_calls_rpm_ostree(self, mocker: MockerFixture) -> None:
         """Test that get_deployment_info calls rpm-ostree status -v."""
         mock_result = mocker.MagicMock()

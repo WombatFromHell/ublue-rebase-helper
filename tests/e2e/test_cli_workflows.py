@@ -22,8 +22,13 @@ class TestCLIDirectCommandExecution:
     """Test direct command execution via CLI arguments."""
 
     @pytest.fixture(autouse=True)
-    def setup_test_environment(self, mocker: MockerFixture) -> None:
+    def setup_test_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup common test environment for all CLI tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Force non-TTY to avoid gum menu hanging
         mocker.patch("os.isatty", return_value=False)
 
@@ -319,8 +324,13 @@ class TestCLIMenuNavigation:
     """Test menu-driven command selection and navigation."""
 
     @pytest.fixture(autouse=True)
-    def setup_menu_test_environment(self, mocker: MockerFixture) -> None:
+    def setup_menu_test_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for menu navigation tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Mock subprocess with default return value for any call
         mock_subprocess = mocker.patch("subprocess.run")
         mock_subprocess.return_value = mocker.MagicMock(returncode=0, stdout="")
@@ -411,8 +421,13 @@ class TestCLIErrorHandling:
     """Test CLI error handling scenarios."""
 
     @pytest.fixture(autouse=True)
-    def setup_error_test_environment(self, mocker: MockerFixture) -> None:
+    def setup_error_test_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for error handling tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         mocker.patch("os.isatty", return_value=False)
         mocker.patch("src.urh.system.check_curl_presence", return_value=True)
         mocker.patch(
@@ -502,8 +517,13 @@ class TestCLIArgumentParsing:
     """Test CLI argument parsing and validation."""
 
     @pytest.fixture(autouse=True)
-    def setup_arg_test_environment(self, mocker: MockerFixture) -> None:
+    def setup_arg_test_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for argument parsing tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         mocker.patch("os.isatty", return_value=False)
         mocker.patch("src.urh.system.check_curl_presence", return_value=True)
         mocker.patch(

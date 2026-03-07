@@ -259,6 +259,81 @@ def mock_subprocess_run(mocker: MockerFixture) -> Any:
 
 
 @pytest.fixture
+def mock_rpm_ostree_commands(mocker: MockerFixture) -> Any:
+    """
+    Mock rpm-ostree, ostree, and curl commands to prevent FileNotFoundError in tests.
+
+    This fixture mocks subprocess.run to handle any rpm-ostree, ostree, and curl
+    commands with sensible default responses, preventing tests from failing when
+    these commands don't exist on the test runner.
+
+    Usage:
+        def test_with_rpm_ostree(mock_rpm_ostree_commands):
+            # rpm-ostree, ostree, and curl commands now return mock results
+            # Can be configured with custom responses via the factory
+
+    Returns:
+        Factory function that accepts configuration parameters:
+        - status_output: str for rpm-ostree status -v
+        - kargs_output: str for rpm-ostree kargs
+        - curl_path: str for curl path check (default: "/usr/bin/curl")
+        - returncode: int exit code (default 0)
+    """
+
+    def _factory(
+        status_output: str = "",
+        kargs_output: str = "",
+        curl_path: str = "/usr/bin/curl",
+        returncode: int = 0,
+    ) -> Any:
+        def mock_subprocess_handler(cmd: list, **kwargs: Any) -> Any:
+            mock_result = mocker.MagicMock()
+            mock_result.returncode = returncode
+
+            # Handle curl check commands (which curl, type curl, etc.)
+            if "curl" in cmd:
+                # Check if it's a "which curl" or similar path check
+                if cmd[0] in ("which", "type", "command"):
+                    mock_result.stdout = curl_path
+                    mock_result.returncode = 0
+                else:
+                    # Actual curl command - return empty response by default
+                    mock_result.stdout = ""
+                    mock_result.returncode = 0
+            # Handle rpm-ostree status -v
+            elif "rpm-ostree" in cmd and "status" in cmd:
+                mock_result.stdout = status_output or """State: idle
+Deployments:
+● ostree-image-signed:docker://ghcr.io/test/repo:testing
+                   Version: 1.0.0
+                    Commit: abc123
+"""
+            # Handle rpm-ostree kargs (read-only)
+            elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
+                mock_result.stdout = kargs_output or "quiet loglevel=3"
+            # Handle ostree admin pin commands
+            elif "ostree" in cmd and "admin" in cmd and "pin" in cmd:
+                mock_result.stdout = ""
+            # Handle ostree admin undeploy
+            elif "ostree" in cmd and "admin" in cmd and "undeploy" in cmd:
+                mock_result.stdout = ""
+            # Default for other rpm-ostree/ostree commands
+            elif "rpm-ostree" in cmd or "ostree" in cmd:
+                mock_result.stdout = ""
+            else:
+                # For other commands, let them fail
+                # so tests catch unmocked calls
+                mock_result.returncode = 1
+                mock_result.stderr = f"Unmocked command: {' '.join(cmd)}"
+
+            return mock_result
+
+        return mocker.patch("subprocess.run", side_effect=mock_subprocess_handler)
+
+    return _factory
+
+
+@pytest.fixture
 def mock_curl_response(mocker: MockerFixture) -> Any:
     """
     Mock curl response for OCI registry calls.

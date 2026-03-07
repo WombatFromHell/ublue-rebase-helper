@@ -114,14 +114,19 @@ class TestKargsCommand:
         """Setup test environment for kargs tests."""
         mocker.patch("sys.exit")
 
-    def test_kargs_no_args_shows_menu(self, mocker: MockerFixture) -> None:
+    def test_kargs_no_args_shows_menu(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs command without arguments shows submenu."""
+        # Mock rpm-ostree commands (status, kargs) to avoid FileNotFoundError
+        mock_rpm_ostree_commands()
+        
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
-
+        
         # Use dependency injection: create mock menu system and inject it
         mock_menu = mocker.MagicMock()
         mock_menu.show_menu.return_value = "show"
-
+        
         # Inject mock menu system into CommandRegistry
         registry = CommandRegistry(menu_system=mock_menu)
         registry._handle_kargs([])
@@ -129,8 +134,11 @@ class TestKargsCommand:
         mock_menu.show_menu.assert_called_once()
         mock_run.assert_called_once_with(["rpm-ostree", "kargs"])
 
-    def test_kargs_show_subcommand(self, mocker: MockerFixture) -> None:
+    def test_kargs_show_subcommand(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs show subcommand (read-only, no sudo)."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -138,8 +146,11 @@ class TestKargsCommand:
 
         mock_run.assert_called_once_with(["rpm-ostree", "kargs"])
 
-    def test_kargs_append_subcommand_with_sudo(self, mocker: MockerFixture) -> None:
+    def test_kargs_append_subcommand_with_sudo(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs append subcommand uses sudo."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -148,8 +159,11 @@ class TestKargsCommand:
         call_args = mock_run.call_args[0][0]
         assert call_args == ["sudo", "rpm-ostree", "kargs", "--append-if-missing=quiet"]
 
-    def test_kargs_append_subcommand_multiple_args(self, mocker: MockerFixture) -> None:
+    def test_kargs_append_subcommand_multiple_args(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs append subcommand with multiple arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -165,9 +179,10 @@ class TestKargsCommand:
         ]
 
     def test_kargs_append_subcommand_space_delimited(
-        self, mocker: MockerFixture
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
     ) -> None:
         """Test kargs append subcommand with space-delimited arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -182,8 +197,11 @@ class TestKargsCommand:
             "--append-if-missing=loglevel=3",
         ]
 
-    def test_kargs_append_subcommand_no_args_error(self, mocker: MockerFixture) -> None:
+    def test_kargs_append_subcommand_no_args_error(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs append subcommand errors without arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_print = mocker.patch("builtins.print")
 
@@ -193,8 +211,11 @@ class TestKargsCommand:
         mock_print.assert_called()
         mock_run.assert_not_called()
 
-    def test_kargs_delete_subcommand_with_sudo(self, mocker: MockerFixture) -> None:
+    def test_kargs_delete_subcommand_with_sudo(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs delete subcommand uses sudo."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -203,8 +224,11 @@ class TestKargsCommand:
         call_args = mock_run.call_args[0][0]
         assert call_args == ["sudo", "rpm-ostree", "kargs", "--delete-if-present=quiet"]
 
-    def test_kargs_delete_subcommand_multiple_args(self, mocker: MockerFixture) -> None:
+    def test_kargs_delete_subcommand_multiple_args(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs delete subcommand with multiple arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -220,9 +244,10 @@ class TestKargsCommand:
         ]
 
     def test_kargs_delete_subcommand_space_delimited(
-        self, mocker: MockerFixture
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
     ) -> None:
         """Test kargs delete subcommand with space-delimited arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -237,8 +262,11 @@ class TestKargsCommand:
             "--delete-if-present=loglevel",
         ]
 
-    def test_kargs_delete_subcommand_no_args_error(self, mocker: MockerFixture) -> None:
+    def test_kargs_delete_subcommand_no_args_error(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs delete subcommand errors without arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_print = mocker.patch("builtins.print")
 
@@ -248,8 +276,11 @@ class TestKargsCommand:
         mock_print.assert_called()
         mock_run.assert_not_called()
 
-    def test_kargs_replace_subcommand_with_sudo(self, mocker: MockerFixture) -> None:
+    def test_kargs_replace_subcommand_with_sudo(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs replace subcommand uses sudo."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -259,9 +290,10 @@ class TestKargsCommand:
         assert call_args == ["sudo", "rpm-ostree", "kargs", "--replace=loglevel=3"]
 
     def test_kargs_replace_subcommand_multiple_args(
-        self, mocker: MockerFixture
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
     ) -> None:
         """Test kargs replace subcommand with multiple arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -277,9 +309,10 @@ class TestKargsCommand:
         ]
 
     def test_kargs_replace_subcommand_space_delimited(
-        self, mocker: MockerFixture
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
     ) -> None:
         """Test kargs replace subcommand with space-delimited arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -295,9 +328,10 @@ class TestKargsCommand:
         ]
 
     def test_kargs_replace_subcommand_no_args_error(
-        self, mocker: MockerFixture
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
     ) -> None:
         """Test kargs replace subcommand errors without arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_print = mocker.patch("builtins.print")
 
@@ -308,9 +342,10 @@ class TestKargsCommand:
         mock_run.assert_not_called()
 
     def test_kargs_replace_subcommand_invalid_format(
-        self, mocker: MockerFixture
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
     ) -> None:
         """Test kargs replace subcommand errors with invalid format."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
         mock_print = mocker.patch("builtins.print")
 
@@ -320,8 +355,11 @@ class TestKargsCommand:
         mock_print.assert_called()
         mock_run.assert_not_called()
 
-    def test_kargs_with_help_flag_no_sudo(self, mocker: MockerFixture) -> None:
+    def test_kargs_with_help_flag_no_sudo(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs command with --help flag doesn't use sudo."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()
@@ -334,8 +372,11 @@ class TestKargsCommand:
         assert "kargs" in call_args
         assert "--help" in call_args
 
-    def test_kargs_legacy_mode_direct_args(self, mocker: MockerFixture) -> None:
+    def test_kargs_legacy_mode_direct_args(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Test kargs command in legacy mode with direct arguments."""
+        mock_rpm_ostree_commands()
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
 
         registry = CommandRegistry()

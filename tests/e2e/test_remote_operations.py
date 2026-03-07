@@ -20,8 +20,13 @@ class TestRemoteLsCommand:
     """Test remote-ls command end-to-end workflows."""
 
     @pytest.fixture(autouse=True)
-    def setup_remote_ls_environment(self, mocker: MockerFixture) -> None:
+    def setup_remote_ls_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for remote-ls tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Mock deployment info for header
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
@@ -154,8 +159,13 @@ class TestOCIClientIntegration:
     """Test OCIClient integration with remote-ls command."""
 
     @pytest.fixture(autouse=True)
-    def setup_oci_environment(self, mocker: MockerFixture) -> None:
+    def setup_oci_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for OCI client integration tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},
@@ -199,8 +209,13 @@ class TestTokenManagerIntegration:
     """Test token manager integration with remote-ls command."""
 
     @pytest.fixture(autouse=True)
-    def setup_token_environment(self, mocker: MockerFixture) -> None:
+    def setup_token_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for token manager tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
             return_value={"repository": "test-repo", "version": "1.0.0"},

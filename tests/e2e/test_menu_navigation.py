@@ -24,8 +24,13 @@ class TestMainMenuNavigation:
     """Test main menu display and command selection."""
 
     @pytest.fixture(autouse=True)
-    def setup_menu_environment(self, mocker: MockerFixture) -> None:
+    def setup_menu_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup common test environment for menu navigation tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Mock deployment info at cli.py level (where functions are imported)
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
@@ -100,8 +105,13 @@ class TestSubmenuNavigation:
     """Test submenu navigation for commands with options."""
 
     @pytest.fixture(autouse=True)
-    def setup_submenu_environment(self, mocker: MockerFixture) -> None:
+    def setup_submenu_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for submenu tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Mock deployment info at cli.py level
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
@@ -224,8 +234,13 @@ class TestDeploymentSelectionMenus:
     """Test deployment selection menus for pin/unpin/rm/undeploy commands."""
 
     @pytest.fixture(autouse=True)
-    def setup_deployment_environment(self, mocker: MockerFixture) -> None:
+    def setup_deployment_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for deployment menu tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Mock deployment info at deployment.py level
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
@@ -525,8 +540,13 @@ class TestMenuHeaderDisplay:
     """Test persistent header display in menus."""
 
     @pytest.fixture(autouse=True)
-    def setup_header_environment(self, mocker: MockerFixture) -> None:
+    def setup_header_environment(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
         """Setup test environment for header tests."""
+        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
+        mock_rpm_ostree_commands()
+
         # Mock deployment info at cli.py level with default values
         mocker.patch(
             "src.urh.deployment.get_current_deployment_info",
