@@ -222,7 +222,7 @@ class TestKargsCommand:
         registry._handle_kargs(["delete", "quiet"])
 
         call_args = mock_run.call_args[0][0]
-        assert call_args == ["sudo", "rpm-ostree", "kargs", "--delete-if-present=quiet"]
+        assert call_args == ["sudo", "rpm-ostree", "kargs", "--delete=quiet"]
 
     def test_kargs_delete_subcommand_multiple_args(
         self, mocker: MockerFixture, mock_rpm_ostree_commands
@@ -239,8 +239,8 @@ class TestKargsCommand:
             "sudo",
             "rpm-ostree",
             "kargs",
-            "--delete-if-present=quiet",
-            "--delete-if-present=loglevel",
+            "--delete=quiet",
+            "--delete=loglevel",
         ]
 
     def test_kargs_delete_subcommand_space_delimited(
@@ -258,8 +258,8 @@ class TestKargsCommand:
             "sudo",
             "rpm-ostree",
             "kargs",
-            "--delete-if-present=quiet",
-            "--delete-if-present=loglevel",
+            "--delete=quiet",
+            "--delete=loglevel",
         ]
 
     def test_kargs_delete_subcommand_no_args_error(

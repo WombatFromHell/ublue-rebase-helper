@@ -200,7 +200,7 @@ class TestCLIDirectCommandExecution:
                 "sudo",
                 "rpm-ostree",
                 "kargs",
-                "--delete-if-present=quiet",
+                "--delete=quiet",
             ]
 
             mock_exit.assert_called_once_with(0)
@@ -258,8 +258,8 @@ class TestCLIDirectCommandExecution:
                 "sudo",
                 "rpm-ostree",
                 "kargs",
-                "--delete-if-present=quiet",
-                "--delete-if-present=loglevel",
+                "--delete=quiet",
+                "--delete=loglevel",
             ]
 
             mock_exit.assert_called_once_with(0)
@@ -290,8 +290,8 @@ class TestCLIDirectCommandExecution:
                 "sudo",
                 "rpm-ostree",
                 "kargs",
-                "--delete-if-present=quiet",
-                "--delete-if-present=loglevel",
+                "--delete=quiet",
+                "--delete=loglevel",
             ]
 
             mock_exit.assert_called_once_with(0)

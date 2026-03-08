@@ -522,16 +522,16 @@ class CommandRegistry:
 
         # Validate each argument
         for karg in kargs:
-            if not karg.replace("_", "").replace("-", "").isalnum():
+            if not karg.replace("_", "").replace("-", "").replace(".", "").isalnum():
                 print(f"Error: Invalid kernel argument key: {karg}")
                 print("Usage: urh kargs delete <key> [key ...]")
                 sys.exit(1)
                 return
 
-        # Build command with multiple --delete-if-present flags
+        # Build command with multiple --delete flags
         cmd = ["sudo", "rpm-ostree", "kargs"]
         for karg in kargs:
-            cmd.append(f"--delete-if-present={karg}")
+            cmd.append(f"--delete={karg}")
 
         sys.exit(_run_command(cmd))
 
