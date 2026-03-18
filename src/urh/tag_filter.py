@@ -56,8 +56,18 @@ class OCITagFilter:
         return False
 
     def _should_filter_signature_tags(self, tag_lower: str) -> bool:
-        """Check if tag should be filtered as a signature tag."""
-        return tag_lower.endswith(".sig") and "sha256-" in tag_lower
+        """Check if tag should be filtered as a signature/attestation tag.
+
+        Handles cosign v2.x and v3.x signature and attestation tags:
+        - sha256-<hash>.sig (v2.x legacy signatures)
+        - sha256-<hash>.att (v3.x attestations)
+        - sha256-<hash>.sbom (v3.x SBOMs)
+        - sha256-<hash> (v3.x bundles without suffix)
+        """
+        if not tag_lower.startswith("sha256-"):
+            return False
+        # Filter all sha256- prefixed tags (covers v2.x .sig and v3.x bundles)
+        return True
 
     def _should_filter_sha256_hashes(self, tag: str) -> bool:
         """Check if tag should be filtered as a SHA256 hash."""
@@ -121,13 +131,6 @@ class OCITagFilter:
         """Filter tags based on context."""
         context_prefix = f"{context}-"
         context_tags = [tag for tag in tags if tag.startswith(context_prefix)]
-
-        # Special handling for astrovm/amyos with latest context
-        if self.repository == "astrovm/amyos" and context == "latest":
-            # For amyos with latest context, we want YYYYMMDD format tags
-            # which are the transformed version of latest.YYYYMMDD tags
-            date_pattern = r"^\d{8}$"
-            context_tags = [tag for tag in tags if re.match(date_pattern, tag)]
 
         return context_tags
 

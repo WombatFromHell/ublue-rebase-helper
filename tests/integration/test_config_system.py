@@ -47,7 +47,6 @@ class TestURHConfigDefaults:
             "ublue-os/bazzite",
             "ublue-os/bazzite-nvidia-open",
             "wombatfromhell/bazzite-nix",
-            "wombatfromhell/bazzite-nvidia-open-nix",
         ]
 
         for repo_name in standard_repos:
@@ -55,17 +54,6 @@ class TestURHConfigDefaults:
             repo_config = config.repositories[repo_name]
             assert isinstance(repo_config, RepositoryConfig)
             assert not repo_config.include_sha256_tags
-
-    def test_default_has_amyos_repository(self) -> None:
-        """Test that default config includes astrovm/amyos with special config."""
-        config = URHConfig.get_default()
-
-        assert "astrovm/amyos" in config.repositories
-        amyos_config = config.repositories["astrovm/amyos"]
-
-        assert not amyos_config.include_sha256_tags
-        assert amyos_config.latest_dot_handling == "transform_dates_only"
-        assert len(amyos_config.transform_patterns) > 0
 
     def test_default_container_urls(self) -> None:
         """Test that default config has container URLs configured."""
@@ -498,21 +486,6 @@ class TestCreateDefaultConfig:
         content = config_path.read_text()
         assert "ublue-os/bazzite" in content
         assert "wombatfromhell/bazzite-nix" in content
-
-    def test_create_default_config_has_amyos_transform(
-        self, mocker: MockerFixture, tmp_path: Path
-    ) -> None:
-        """Test that default config includes amyos transform patterns."""
-        manager = ConfigManager()
-        config_path = tmp_path / "urh.toml"
-
-        mocker.patch.object(manager, "get_config_path", return_value=config_path)
-        manager.create_default_config()
-
-        content = config_path.read_text()
-        assert "astrovm/amyos" in content
-        assert "transform_patterns" in content
-        assert "latest_dot_handling" in content
 
     def test_created_config_is_loadable(
         self, mocker: MockerFixture, tmp_path: Path

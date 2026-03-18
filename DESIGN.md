@@ -38,7 +38,7 @@ This utility is designed to:
 #### `remote-ls <url>`
 
 - **Function**: List available tags for a container image from a remote registry
-- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `OCIClient.get_all_tags()` to fetch tags from the public `tags/list` endpoint with pagination support by following Link headers. Tags are filtered using rules defined in the TOML configuration file (`~/.config/urh.toml`) to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature tags (ending in `.sig`). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. For the `astrovm/amyos` repository, the `:latest` context is also recognized and will filter to show only YYYYMMDD format tags (which are the transformed version of the original `latest.YYYYMMDD` tags). Both context-aware and non-context filtering include deduplication to avoid duplicate versions. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags (configurable via TOML settings).
+- **Uses**: Extracts repository name from URL (e.g., from `ghcr.io/user/repo:tag` extracts `user/repo`) and uses `OCIClient.get_all_tags()` to fetch tags from the public `tags/list` endpoint with pagination support by following Link headers. Tags are filtered using rules defined in the TOML configuration file (`~/.config/urh.toml`) to remove SHA256 references, aliases (latest, testing, stable, unstable), and signature/attestation tags (cosign v2.x `.sig` and v3.x `.att`/`.sbom` bundles). When the URL specifies a context like `:testing`, `:stable`, or `:unstable`, ONLY tags prefixed with that context (e.g., `testing-<tag>`, `stable-<tag>`, `unstable-<tag>`) are shown in the results. Both context-aware and non-context filtering include deduplication to avoid duplicate versions. When no context is specified (e.g., `ghcr.io/user/repo`), both prefixed and non-prefixed tags are shown but duplicates with the same version are deduplicated (preferring prefixed versions when available). Tags following the formats `<XX>.<YYYY><MM><DD>[.<SUBVER>]` or `<YYYY><MM><DD>[.<SUBVER>]` (with optional `testing-`, `stable-`, or `unstable-` prefixes) are sorted by version series and date, with higher subversions taking precedence. Results are limited to a maximum of 30 tags (configurable via TOML settings).
 - **Requires sudo**: No
 - **Interactive submenu**: When no `<url>` is specified, uses the MenuSystem to display a submenu of container URLs loaded from the TOML configuration file, similar to the rebase command options
 
@@ -180,11 +180,11 @@ The configuration system is implemented using dataclasses with validation:
 
 Repository-specific filter rules are defined in the `[[repository]]` section of the TOML file as an array of tables. Each repository is defined with:
 
-- `name`: The repository name (required field, e.g., "ublue-os/bazzite", "wombatfromhell/bazzite-nix", "astrovm/amyos")
+- `name`: The repository name (required field, e.g., "ublue-os/bazzite", "wombatfromhell/bazzite-nix")
 - `include_sha256_tags`: Whether to include SHA256 hash tags (default: false)
 - `filter_patterns`: List of regex patterns for tags to be filtered out
 - `ignore_tags`: List of exact tag names to be filtered out
-- `transform_patterns`: List of pattern/replacement pairs for tag transformations (e.g., for astrovm/amyos latest.YYYYMMDD -> YYYYMMDD)
+- `transform_patterns`: List of pattern/replacement pairs for tag transformations
 - `latest_dot_handling`: Optional handling for latest. tags (e.g., "transform_dates_only")
 
 ### Container URL Configuration
@@ -197,10 +197,9 @@ The container URLs available in the rebase and remote-ls submenus are defined in
 **Single Source of Truth**: Repository endpoints are defined once in `config.py` using module-level constants:
 
 - `_STANDARD_REPOSITORIES`: Tuple of `(repo_name, default_tag)` for standard repositories
-- `_SPECIAL_REPOSITORIES`: Tuple of `(repo_name, default_tag)` for repositories with custom configurations
 - `_ALL_REPOSITORIES`: Combined tuple of all repositories
 
-All container URL lists (in `ContainerURLsConfig`, `URHConfig.get_default()`, and `ConfigManager._write_default_config()`) are derived from these constants. To add a new endpoint, add one entry to `_STANDARD_REPOSITORIES` or `_SPECIAL_REPOSITORIES`.
+All container URL lists (in `ContainerURLsConfig`, `URHConfig.get_default()`, and `ConfigManager._write_default_config()`) are derived from these constants. To add a new endpoint, add one entry to `_STANDARD_REPOSITORIES`.
 
 ### Settings Configuration
 
@@ -360,7 +359,6 @@ The `OCITagFilter` class handles tag filtering and sorting logic:
 The implementation supports context-aware tag filtering for different repositories:
 
 - For standard repositories, when a context like `:testing`, `:stable`, or `:unstable` is specified, only tags prefixed with that context are shown
-- For the `astrovm/amyos` repository, the `:latest` context is recognized and filters to show only YYYYMMDD format tags
 - The `latest_dot_handling` configuration option can be set to "transform_dates_only" for special handling of latest. tags
 
 ### Exception Handling

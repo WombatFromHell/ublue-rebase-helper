@@ -54,23 +54,12 @@ def sample_config_data() -> Dict[str, Any]:
                 "include_sha256_tags": False,
                 "filter_patterns": [
                     r"^sha256-.*\.sig$",
+                    r"^sha256-.*\.att$",
+                    r"^sha256-.*\.sbom$",
                     r"^sha256-.*",
                     r"^(latest|testing|stable|unstable)$",
                 ],
                 "ignore_tags": ["latest", "testing", "stable", "unstable"],
-            },
-            {
-                "name": "astrovm/amyos",
-                "include_sha256_tags": False,
-                "filter_patterns": [
-                    r"^sha256-.*\.sig$",
-                    r"^(testing|stable|unstable)$",
-                ],
-                "ignore_tags": ["testing", "stable", "unstable"],
-                "transform_patterns": [
-                    {"pattern": r"^latest\.(\d{8})$", "replacement": r"\1"}
-                ],
-                "latest_dot_handling": "transform_dates_only",
             },
         ],
         "container_urls": {
@@ -94,6 +83,7 @@ def sample_tags_data() -> Dict[str, List[str]]:
     - SHA256 hashes and signatures
     - Context-prefixed versions (testing-X.X, stable-X.X)
     - Date-based versions (YYYYMMDD)
+    - Cosign v2.x signatures (.sig) and v3.x attestations (.att, .sbom)
     """
     return {
         "tags": [
@@ -103,6 +93,8 @@ def sample_tags_data() -> Dict[str, List[str]]:
             "unstable",
             "sha256-abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
             "sha256-abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890.sig",
+            "sha256-abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890.att",
+            "sha256-abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890.sbom",
             "testing-42.20231115.0",
             "testing-41.20231110.0",
             "stable-42.20231115.0",
@@ -302,12 +294,15 @@ def mock_rpm_ostree_commands(mocker: MockerFixture) -> Any:
                     mock_result.returncode = 0
             # Handle rpm-ostree status -v
             elif "rpm-ostree" in cmd and "status" in cmd:
-                mock_result.stdout = status_output or """State: idle
+                mock_result.stdout = (
+                    status_output
+                    or """State: idle
 Deployments:
 ● ostree-image-signed:docker://ghcr.io/test/repo:testing
                    Version: 1.0.0
                     Commit: abc123
 """
+                )
             # Handle rpm-ostree kargs (read-only)
             elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
                 mock_result.stdout = kargs_output or "quiet loglevel=3"

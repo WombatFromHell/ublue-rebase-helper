@@ -19,23 +19,17 @@ logger = logging.getLogger(__name__)
 # Single source of truth for standard repositories
 # Format: (repo_name, default_tag)
 _STANDARD_REPOSITORIES: tuple[tuple[str, str], ...] = (
-    ("wombatfromhell/bazzite-nix", "testing"),
     ("wombatfromhell/bazzite-nix", "stable"),
-    ("wombatfromhell/bazzite-nix-cachyos", "testing"),
-    ("wombatfromhell/bazzite-nvidia-open-nix", "stable"),
-    ("ublue-os/bazzite", "testing"),
+    ("wombatfromhell/bazzite-nix", "testing"),
+    ("wombatfromhell/bazzite-nix", "unstable"),
     ("ublue-os/bazzite", "stable"),
+    ("ublue-os/bazzite", "testing"),
+    ("ublue-os/bazzite", "unstable"),
     ("ublue-os/bazzite-nvidia-open", "stable"),
 )
 
-# Special repositories with custom configurations
-_SPECIAL_REPOSITORIES: tuple[tuple[str, str], ...] = (("astrovm/amyos", "latest"),)
-
 # All repositories combined for container URL generation
-_ALL_REPOSITORIES: tuple[tuple[str, str], ...] = (
-    *_STANDARD_REPOSITORIES,
-    *_SPECIAL_REPOSITORIES,
-)
+_ALL_REPOSITORIES: tuple[tuple[str, str], ...] = (*_STANDARD_REPOSITORIES,)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -129,26 +123,13 @@ class URHConfig:
         """Get standard filter patterns for most repositories."""
         return [
             r"^sha256-.*\.sig$",
+            r"^sha256-.*\.att$",
+            r"^sha256-.*\.sbom$",
             r"^sha256-.*",
             r"^sha256:.*",
             r"^[0-9a-fA-F]{40,64}$",
             r"^<.*>$",
             r"^(latest|testing|stable|unstable)$",
-            r"^testing\..*",
-            r"^stable\..*",
-            r"^unstable\..*",
-            r"^\d{1,2}$",
-            r"^(latest|testing|stable|unstable)-\d{1,2}$",
-            r"^\d{1,2}-(testing|stable|unstable)$",
-        ]
-
-    @classmethod
-    def _get_amyos_filter_patterns(cls) -> List[str]:
-        """Get filter patterns for astrovm/amyos repository."""
-        return [
-            r"^sha256-.*\.sig$",
-            r"^<.*>$",
-            r"^(testing|stable|unstable)$",
             r"^testing\..*",
             r"^stable\..*",
             r"^unstable\..*",
@@ -167,19 +148,6 @@ class URHConfig:
         )
 
     @classmethod
-    def _create_amyos_repository_config(cls) -> RepositoryConfig:
-        """Create astrovm/amyos repository configuration."""
-        return RepositoryConfig(
-            include_sha256_tags=False,
-            filter_patterns=cls._get_amyos_filter_patterns(),
-            ignore_tags=["testing", "stable", "unstable"],
-            transform_patterns=[
-                {"pattern": r"^latest\.(\d{8})$", "replacement": r"\1"}
-            ],
-            latest_dot_handling="transform_dates_only",
-        )
-
-    @classmethod
     def get_default(cls) -> Self:
         """Get default configuration."""
         config = cls()
@@ -187,11 +155,6 @@ class URHConfig:
         # Standard repositories with identical configuration
         for repo_name, _ in _STANDARD_REPOSITORIES:
             config.repositories[repo_name] = cls._create_standard_repository_config()
-
-        # Special repositories with custom configurations
-        for repo_name, _ in _SPECIAL_REPOSITORIES:
-            if repo_name == "astrovm/amyos":
-                config.repositories[repo_name] = cls._create_amyos_repository_config()
 
         return config
 
@@ -207,6 +170,8 @@ class ConfigManager:
         """Get standard filter patterns for most repositories."""
         return [
             r"^sha256-.*\.sig$",
+            r"^sha256-.*\.att$",
+            r"^sha256-.*\.sbom$",
             r"^sha256-.*",
             r"^sha256:.*",
             r"^[0-9a-fA-F]{40,64}$",
@@ -532,30 +497,6 @@ class ConfigManager:
                 # Only specify overrides if they differ from defaults
                 # include_sha256_tags defaults to false, so we don't need to specify it
                 f.write("\n")
-
-            # Write special astrovm/amyos repository with explicit configuration
-            f.write("# Special repository with custom configuration\n")
-            f.write("[[repository]]\n")
-            f.write('name = "astrovm/amyos"\n')
-            f.write("include_sha256_tags = false\n")
-
-            # Write filter_patterns (different from standard)
-            amyos_config = default_config.repositories["astrovm/amyos"]
-            f.write("filter_patterns = ")
-            f.write(self._serialize_value(amyos_config.filter_patterns, 0) + "\n")
-
-            # Write ignore_tags (different from standard - no "latest")
-            f.write("ignore_tags = ")
-            f.write(self._serialize_value(amyos_config.ignore_tags, 0) + "\n")
-
-            # Write transform_patterns
-            f.write("transform_patterns = ")
-            f.write(self._serialize_value(amyos_config.transform_patterns, 0) + "\n")
-
-            # Write latest_dot_handling
-            f.write(f'latest_dot_handling = "{amyos_config.latest_dot_handling}"\n')
-
-            f.write("\n")
 
             # Write container URLs section
             f.write("[container_urls]\n")

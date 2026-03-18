@@ -120,13 +120,13 @@ class TestKargsCommand:
         """Test kargs command without arguments shows submenu."""
         # Mock rpm-ostree commands (status, kargs) to avoid FileNotFoundError
         mock_rpm_ostree_commands()
-        
+
         mock_run = mocker.patch("src.urh.commands._run_command", return_value=0)
-        
+
         # Use dependency injection: create mock menu system and inject it
         mock_menu = mocker.MagicMock()
         mock_menu.show_menu.return_value = "show"
-        
+
         # Inject mock menu system into CommandRegistry
         registry = CommandRegistry(menu_system=mock_menu)
         registry._handle_kargs([])
