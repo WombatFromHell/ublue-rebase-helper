@@ -152,21 +152,22 @@ class TestSettingsConfigValidation:
 class TestConfigManagerLoading:
     """Test ConfigManager config loading functionality."""
 
-    def test_load_config_creates_default_if_missing(
+    def test_load_config_returns_defaults_if_missing(
         self, mocker: MockerFixture, tmp_path: Path
     ) -> None:
-        """Test that missing config file triggers default config creation."""
+        """Test that missing config file returns hardcoded defaults without creating file."""
         manager = ConfigManager()
         config_path = tmp_path / "urh.toml"
 
-        # Mock get_config_path to return temp path
+        # Mock get_config_path to return temp path (file doesn't exist)
         mocker.patch.object(manager, "get_config_path", return_value=config_path)
-        mocker.patch.object(manager, "create_default_config")
 
         config = manager.load_config()
 
         assert isinstance(config, URHConfig)
         assert len(config.repositories) > 0
+        # Verify no file was created
+        assert not config_path.exists()
 
     def test_load_config_parses_valid_toml(
         self, mocker: MockerFixture, tmp_path: Path
@@ -190,7 +191,10 @@ debug_mode = true
         config = manager.load_config()
 
         assert config.container_urls.default == "ghcr.io/custom/repo:testing"
-        assert len(config.container_urls.options) == 2
+        # User options are merged with defaults (7 defaults + 2 user options = 9)
+        assert len(config.container_urls.options) == 9
+        assert "ghcr.io/custom/repo:testing" in config.container_urls.options
+        assert "ghcr.io/custom/repo:stable" in config.container_urls.options
         assert config.settings.max_tags_display == 50
         assert config.settings.debug_mode is True
 
@@ -350,7 +354,10 @@ options = [
         config = manager.load_config()
 
         assert config.container_urls.default == "ghcr.io/my/repo:custom"
-        assert len(config.container_urls.options) == 2
+        # User options are merged with defaults (7 defaults + 2 user options = 9)
+        assert len(config.container_urls.options) == 9
+        assert "ghcr.io/my/repo:custom" in config.container_urls.options
+        assert "ghcr.io/my/repo:alt" in config.container_urls.options
 
     def test_parse_settings_section(
         self, mocker: MockerFixture, tmp_path: Path
@@ -532,3 +539,90 @@ default = "ghcr.io/global/test:config"
 
         assert isinstance(config, URHConfig)
         assert config.container_urls.default == "ghcr.io/global/test:config"
+
+    def test_shorthand_url_expansion_in_container_urls(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test shorthand URL references are expanded correctly."""
+        manager = ConfigManager()
+        config_path = tmp_path / "urh.toml"
+
+        config_content = """
+[container_urls]
+default = "ublue-os/bazzite:testing"
+options = [
+    "ublue-os/bazzite",
+    "ublue-os/bazzite:stable",
+    "ghcr.io/custom/repo:tag"
+]
+"""
+        config_path.write_text(config_content)
+        mocker.patch.object(manager, "get_config_path", return_value=config_path)
+
+        config = manager.load_config()
+
+        # Default should be expanded
+        assert config.container_urls.default == "ghcr.io/ublue-os/bazzite:testing"
+
+        # Options should be expanded and merged with defaults
+        assert "ghcr.io/ublue-os/bazzite:testing" in config.container_urls.options
+        assert "ghcr.io/ublue-os/bazzite:stable" in config.container_urls.options
+        assert "ghcr.io/custom/repo:tag" in config.container_urls.options
+
+    def test_auto_generate_container_urls_from_repositories(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test auto_generate creates options from repository tags."""
+        manager = ConfigManager()
+        config_path = tmp_path / "urh.toml"
+
+        config_content = """
+[[repository]]
+name = "ublue-os/bazzite-nvidia-open-cachyos"
+tags = ["testing", "stable"]
+
+[container_urls]
+auto_generate = true
+default = "ublue-os/bazzite-nvidia-open-cachyos:testing"
+"""
+        config_path.write_text(config_content)
+        mocker.patch.object(manager, "get_config_path", return_value=config_path)
+
+        config = manager.load_config()
+
+        # Default should be expanded
+        assert (
+            config.container_urls.default
+            == "ghcr.io/ublue-os/bazzite-nvidia-open-cachyos:testing"
+        )
+
+        # Options should include auto-generated URLs from repositories
+        assert (
+            "ghcr.io/ublue-os/bazzite-nvidia-open-cachyos:testing"
+            in config.container_urls.options
+        )
+        assert (
+            "ghcr.io/ublue-os/bazzite-nvidia-open-cachyos:stable"
+            in config.container_urls.options
+        )
+
+    def test_repository_with_tags_field(
+        self, mocker: MockerFixture, tmp_path: Path
+    ) -> None:
+        """Test repository tags field is parsed correctly."""
+        manager = ConfigManager()
+        config_path = tmp_path / "urh.toml"
+
+        config_content = """
+[[repository]]
+name = "ublue-os/bazzite-nvidia-open-cachyos"
+tags = ["testing", "stable", "unstable"]
+"""
+        config_path.write_text(config_content)
+        mocker.patch.object(manager, "get_config_path", return_value=config_path)
+
+        config = manager.load_config()
+
+        repo_config = config.repositories.get("ublue-os/bazzite-nvidia-open-cachyos")
+        assert repo_config is not None
+        assert repo_config.tags == ["testing", "stable", "unstable"]

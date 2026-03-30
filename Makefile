@@ -2,7 +2,9 @@
 # Deterministic build system for ublue-rebase-helper
 # Uses staging-directory approach with fixed timestamps for bitwise reproducibility
 
-PY ?= $(PYTHON)
+SHELL := /bin/bash
+.SHELLFLAGS := -lc
+#
 SRC_DIR = src
 BUILD_DIR = dist
 ENTRY = entry:main

@@ -35,6 +35,36 @@ This utility is designed to:
 - **URL prefixing**: Automatically ensures the URL has the ostree-image-signed:docker:// prefix if not already present using `ensure_ostree_prefix()` function
 - **Usage**: Users can navigate with arrow keys or select directly by number; press ESC to cancel
 
+##### Tag Resolution Feature
+
+The `rebase` command supports intelligent tag resolution for simplified invocation:
+
+- **Short tags**: Running `urh rebase unstable` automatically resolves to the latest available unstable tag (e.g., `unstable-43.20260326.1`) by fetching available tags from the registry
+- **Full tags**: Running `urh rebase unstable-43.20260326.1` uses the exact tag provided, automatically prefixing with the configured repository
+- **Repository suffix syntax**: Running `urh rebase bazzite-nix-nvidia-open:testing` resolves to the specified repository variant with the base owner (e.g., `ghcr.io/wombatfromhell/bazzite-nix-nvidia-open:testing-43.20260326.1`)
+- **Full URLs**: Running `urh rebase ghcr.io/user/repo:tag` uses the URL as-is without modification
+
+##### Confirmation Prompt
+
+- **When shown**:
+  - When using short tags that require resolution (e.g., `unstable`, `testing`), a confirmation prompt is displayed showing all matching tags and the resolved version
+  - When using a full version tag (e.g., `testing-43.20260326.1`) without explicitly specifying a repository, a confirmation prompt is displayed showing the repository and target tag
+  - Confirmation is **skipped** when the repository is explicitly specified using `repo:tag` syntax (e.g., `bazzite-nix-nvidia-open:testing-43.20260326.1`)
+  - Confirmation is **skipped** when using a full URL (e.g., `ghcr.io/user/repo:tag`)
+- **Prompt format**:
+  - For short tags requiring resolution: Displays matching tags (up to 10), the resolved tag, and asks "Confirm rebase to <tag>? [y/N]:"
+  - For full version tags with implicit repository: Displays "Using repository: <repo>" and "Target: <tag>", then asks "Confirm rebase to <tag>? [y/N]:"
+- **User input**: User must type 'y' or 'Y' to confirm; any other input cancels the operation
+- **Keyboard interrupt**: Pressing Ctrl+C cancels the operation gracefully
+
+##### Skip Confirmation Flag
+
+- **Short form**: `-y`
+- **Long form**: `--yes`
+- **Usage**: `urh rebase -y unstable` or `urh rebase --yes unstable`
+- **Effect**: Bypasses the confirmation prompt and proceeds directly with the resolved tag
+- **Use case**: Useful for scripting and automation scenarios
+
 #### `remote-ls <url>`
 
 - **Function**: List available tags for a container image from a remote registry
@@ -200,6 +230,110 @@ The container URLs available in the rebase and remote-ls submenus are defined in
 - `_ALL_REPOSITORIES`: Combined tuple of all repositories
 
 All container URL lists (in `ContainerURLsConfig`, `URHConfig.get_default()`, and `ConfigManager._write_default_config()`) are derived from these constants. To add a new endpoint, add one entry to `_STANDARD_REPOSITORIES`.
+
+#### Extending with Custom Repositories (variants.json Support)
+
+The configuration system uses a **hybrid approach**: hardcoded defaults are always loaded, and user-provided configuration in `urh.toml` **merges with** (not replaces) these defaults.
+
+This allows users to add custom repositories from their builder's `variants.json` with minimal repetition.
+
+##### Shorthand URL References
+
+To reduce repetition, `container_urls` supports shorthand references that are expanded to full URLs:
+
+| Reference Format | Example                    | Expands To                                   |
+| ---------------- | -------------------------- | -------------------------------------------- |
+| Full URL         | `ghcr.io/user/repo:tag`    | `ghcr.io/user/repo:tag` (unchanged)          |
+| `repo:tag`       | `ublue-os/bazzite:testing` | `ghcr.io/ublue-os/bazzite:testing`           |
+| `repo` (no tag)  | `ublue-os/bazzite`         | `ghcr.io/ublue-os/bazzite:testing` (default) |
+
+##### Auto-Generation from Repositories
+
+Set `auto_generate = true` to automatically generate `options` from all configured repositories:
+
+```toml
+# Define repositories with their tags
+[[repository]]
+name = "ublue-os/bazzite-nvidia-open-cachyos"
+tags = ["testing", "stable"]
+
+[[repository]]
+name = "wombatfromhell/bazzite-nix"
+tags = ["testing", "unstable"]
+
+# Auto-generate options from repositories above
+[container_urls]
+auto_generate = true
+default = "ublue-os/bazzite-nvidia-open-cachyos:testing"
+```
+
+This generates `options` containing:
+
+- `ghcr.io/ublue-os/bazzite-nvidia-open-cachyos:testing`
+- `ghcr.io/ublue-os/bazzite-nvidia-open-cachyos:stable`
+- `ghcr.io/wombatfromhell/bazzite-nix:testing`
+- `ghcr.io/wombatfromhell/bazzite-nix:unstable`
+
+Plus any hardcoded defaults not overridden.
+
+##### Minimal Configuration Example
+
+For a typical variants.json setup, the minimal urh.toml is:
+
+```toml
+# ~/.config/urh.toml
+
+# Just add the new repository with its tags
+[[repository]]
+name = "ublue-os/bazzite-nvidia-open-cachyos"
+tags = ["testing", "stable"]
+
+# Use shorthand references - auto-merges with defaults
+[container_urls]
+default = "ublue-os/bazzite-nvidia-open-cachyos:testing"
+options = [
+    "ublue-os/bazzite-nvidia-open-cachyos",  # Expands to :testing
+    "ublue-os/bazzite-nvidia-open-cachyos:stable",
+]
+```
+
+**Example: Mapping variants.json to urh.toml**
+
+Given a `variants.json` entry:
+
+```json
+{
+  "name": "cachyos",
+  "suffix": "-cachyos",
+  "base_image": "ghcr.io/ublue-os/bazzite-nvidia-open:testing",
+  "latest": true,
+  "disabled": false
+}
+```
+
+This produces:
+
+- **Repository**: `ghcr.io/ublue-os/bazzite-nvidia-open-cachyos` (base + suffix)
+- **Default tag**: `testing` (from base_image)
+- **urh.toml config**:
+
+  ```toml
+  [[repository]]
+  name = "ublue-os/bazzite-nvidia-open-cachyos"
+  tags = ["testing", "stable"]
+
+  [container_urls]
+  default = "ublue-os/bazzite-nvidia-open-cachyos:testing"
+  options = ["ublue-os/bazzite-nvidia-open-cachyos"]  # Shorthand!
+  ```
+
+**Primary Alias Handling**
+
+For the default repository (`wombatfromhell/bazzite-nix`), tags like `testing`, `unstable`, `stable`, and `latest` are treated as **primary aliases** - they point to registry-maintained pointers that always resolve to the latest version. When using these aliases:
+
+- No client-side tag resolution is performed
+- A confirmation prompt shows the alias being used
+- The `-y/--yes` flag skips confirmation
 
 ### Settings Configuration
 

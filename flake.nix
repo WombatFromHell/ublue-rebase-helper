@@ -6,28 +6,29 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+  }:
     flake-utils.lib.eachDefaultSystem (
-      system:
-      let
+      system: let
         pkgs = nixpkgs.legacyPackages.${system};
         # Read Python version from .python-version file (strip newline and dot)
-        pythonVersion = builtins.replaceStrings [ "\n" ] [ "" ] (builtins.readFile ./.python-version);
-        pythonAttr = builtins.replaceStrings [ "." ] [ "" ] pythonVersion;
+        pythonVersion = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./.python-version);
+        pythonAttr = builtins.replaceStrings ["."] [""] pythonVersion;
         python = pkgs."python${pythonAttr}";
-      in
-      {
+      in {
         devShells.default = pkgs.mkShell {
           name = "urh";
 
           buildInputs = [
             python
             pkgs.uv
+            pkgs.mbake
+            pkgs.ruff
+            pkgs.prettier
+            pkgs.ty
             pkgs.zip
             pkgs.rsync
             pkgs.gnused

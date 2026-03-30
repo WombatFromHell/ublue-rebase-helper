@@ -43,6 +43,7 @@ class RepositoryConfig:
         default_factory=lambda: cast(List[Dict[str, str]], [])
     )
     latest_dot_handling: Optional[str] = None
+    tags: List[str] = field(default_factory=lambda: cast(List[str], []))
 
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -85,6 +86,39 @@ class ContainerURLsConfig:
             f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES
         ]
     )
+
+    @classmethod
+    def expand_url_reference(
+        cls, ref: str, repositories: Dict[str, "RepositoryConfig"]
+    ) -> str:
+        """
+        Expand a URL reference to a full URL.
+
+        Supports:
+        - Full URLs: 'ghcr.io/user/repo:tag' -> returned as-is
+        - Short refs: 'repo:tag' -> expanded to 'ghcr.io/repo:tag'
+        - Repo name only: 'repo' -> expanded to 'ghcr.io/repo:testing' (default tag)
+        """
+        # Already a full URL
+        if "://" in ref or ref.startswith("ghcr.io/"):
+            return ref
+
+        # Check if it contains a tag (repo:tag format)
+        if ":" in ref:
+            parts = ref.split(":", 1)
+            repo = parts[0]
+            tag = parts[1]
+            # If repo contains a slash, it's a full path
+            if "/" in repo:
+                return (
+                    f"ghcr.io/{repo}:{tag}"
+                    if not repo.startswith("ghcr.io/")
+                    else f"{repo}:{tag}"
+                )
+            return f"ghcr.io/{repo}:{tag}"
+
+        # Just a repo name, use default tag
+        return f"ghcr.io/{ref}:testing"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -206,8 +240,10 @@ class ConfigManager:
         config_path = self.get_config_path()
 
         if not config_path.exists():
-            self.create_default_config()
-            logger.info(f"Created default config file at {config_path}")
+            # Return hardcoded defaults without creating a file
+            logger.info(
+                f"Config file not found at {config_path}, using hardcoded defaults"
+            )
             self._config = URHConfig.get_default()
             return self._config
 
@@ -218,28 +254,29 @@ class ConfigManager:
                 return self._config
         except tomllib.TOMLDecodeError as e:
             logger.error(f"Error parsing TOML config file: {e}")
-            logger.info("Using default configuration instead.")
+            logger.info("Using hardcoded defaults instead.")
             self._config = URHConfig.get_default()
             return self._config
         except Exception as e:
             logger.error(f"Error reading config file: {e}")
-            logger.info("Using default configuration instead.")
+            logger.info("Using hardcoded defaults instead.")
             self._config = URHConfig.get_default()
             return self._config
 
     def _parse_config(self, data: Dict[str, Any]) -> URHConfig:
-        """Parse configuration data from TOML."""
-        config = URHConfig()
+        """Parse configuration data from TOML, merging with hardcoded defaults."""
+        # Start with hardcoded defaults
+        config = URHConfig.get_default()
 
-        # Parse repositories
+        # Parse repositories (merge with defaults)
         if "repository" in data:
             self._parse_repositories(data["repository"], config)
 
-        # Parse container URLs
+        # Parse container URLs (merge with defaults)
         if "container_urls" in data:
             self._parse_container_urls(data["container_urls"], config)
 
-        # Parse settings
+        # Parse settings (merge with defaults)
         if "settings" in data:
             self._parse_settings(data["settings"], config)
 
@@ -281,6 +318,7 @@ class ConfigManager:
         latest_dot_handling = self._extract_optional_string(
             repo_data, "latest_dot_handling"
         )
+        tags = self._extract_string_list(repo_data, "tags")
 
         return RepositoryConfig(
             include_sha256_tags=include_sha256_tags,
@@ -288,6 +326,7 @@ class ConfigManager:
             ignore_tags=ignore_tags,
             transform_patterns=transform_patterns,
             latest_dot_handling=latest_dot_handling,
+            tags=tags,
         )
 
     def _extract_string_list(self, data: Dict[str, Any], key: str) -> List[str]:
@@ -322,17 +361,62 @@ class ConfigManager:
     def _parse_container_urls(
         self, urls_data: Dict[str, Any], config: URHConfig
     ) -> None:
-        """Parse container URL configurations."""
+        """
+        Parse container URL configurations, merging with defaults.
 
-        default = self._extract_string_with_default(
+        Supports shorthand references:
+        - 'repo' -> 'ghcr.io/repo:testing'
+        - 'repo:tag' -> 'ghcr.io/repo:tag'
+        - Full URLs passed through as-is
+
+        Also auto-generates options from repository tags if 'auto_generate' is true.
+        """
+
+        # Parse default URL (can be a reference or full URL)
+        default_ref = self._extract_string_with_default(
             urls_data, "default", config.container_urls.default
         )
-        options = self._extract_string_list(urls_data, "options")
+        default = ContainerURLsConfig.expand_url_reference(
+            default_ref, config.repositories
+        )
+
+        # Check if auto-generation from repositories is enabled
+        auto_generate = urls_data.get("auto_generate", False)
+
+        # Start with defaults or auto-generated options
+        if auto_generate:
+            # Generate options from all configured repositories
+            options = self._generate_options_from_repositories(config)
+        else:
+            options = list(config.container_urls.options)
+
+        # Merge user-provided options (can be references or full URLs)
+        user_options = self._extract_string_list(urls_data, "options")
+        if user_options:
+            for ref in user_options:
+                # Expand reference to full URL
+                full_url = ContainerURLsConfig.expand_url_reference(
+                    ref, config.repositories
+                )
+                if full_url not in options:
+                    options.append(full_url)
 
         config.container_urls = ContainerURLsConfig(
             default=default,
             options=options,
         )
+
+    def _generate_options_from_repositories(self, config: URHConfig) -> List[str]:
+        """Generate container URL options from configured repositories."""
+        options = []
+        for repo_name, repo_config in config.repositories.items():
+            # Use tags from repo config, or default to 'testing'
+            tags = repo_config.tags if repo_config.tags else ["testing"]
+            for tag in tags:
+                url = f"ghcr.io/{repo_name}:{tag}"
+                if url not in options:
+                    options.append(url)
+        return options
 
     def _extract_string_with_default(
         self, data: Dict[str, Any], key: str, default_value: str

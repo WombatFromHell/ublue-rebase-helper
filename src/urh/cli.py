@@ -76,6 +76,7 @@ def main():
             print("\nOptions:")
             print("  --version, -V  Show version information")
             print("  --help, -h     Show this help message")
+            print("  -y, --yes      Skip confirmation prompts (for rebase command)")
             sys.exit(0)
 
     # Setup logging based on config
@@ -121,11 +122,26 @@ def main():
         else:
             # Execute command directly
             command_name = sys.argv[1]
+            command_args = sys.argv[2:]
+
+            # Parse global flags like -y/--yes
+            skip_confirmation = False
+            if "-y" in command_args or "--yes" in command_args:
+                skip_confirmation = True
+                command_args = [
+                    arg for arg in command_args if arg not in ("-y", "--yes")
+                ]
+
             command = registry.get_command(command_name)
 
             if command:
                 # Pass remaining arguments to the command handler
-                command.handler(sys.argv[2:])
+                # For rebase command, pass skip_confirmation as keyword argument
+                if command_name == "rebase":
+                    # Use **kwargs style to pass skip_confirmation
+                    command.handler(command_args, skip_confirmation=skip_confirmation)  # type: ignore[call-arg]
+                else:
+                    command.handler(command_args)
             else:
                 print(f"Unknown command: {command_name}")
                 print(f"\nublue-rebase-helper v{__version__}")

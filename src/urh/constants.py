@@ -3,7 +3,7 @@ Constants for ublue-rebase-helper.
 """
 
 # Version - injected at build time by Makefile
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 
 
 def format_version_header() -> str:

@@ -3,6 +3,7 @@ Command definitions and registry for ublue-rebase-helper.
 """
 
 import logging
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -595,7 +596,7 @@ class CommandRegistry:
         cmd = ["rpm-ostree", "kargs"]
         sys.exit(_run_command(cmd))
 
-    def _handle_rebase(self, args: List[str]) -> None:
+    def _handle_rebase(self, args: List[str], skip_confirmation: bool = False) -> None:
         """Handle the rebase command."""
         from .config import get_config
 
@@ -632,12 +633,278 @@ class CommandRegistry:
                 # ESC pressed in submenu, return to main menu
                 return
         else:
+            # Parse the tag/URL argument
             url = args[0]
+
+            # Check if this is a short tag that needs resolution
+            resolved_url = self._resolve_tag_to_full_url(url, skip_confirmation)
+            if resolved_url is None:
+                # Resolution failed or was cancelled
+                return
+            url = resolved_url
 
         # Ensure the URL has the proper ostree prefix for rpm-ostree
         prefixed_url = ensure_ostree_prefix(url)
         cmd = ["sudo", "rpm-ostree", "rebase", prefixed_url]
         sys.exit(_run_command(cmd))
+
+    def _resolve_tag_to_full_url(
+        self, tag_or_url: str, skip_confirmation: bool = False
+    ) -> Optional[str]:
+        """
+        Resolve a short tag (e.g., 'unstable') to a full URL.
+
+        Supports syntax:
+        - 'unstable' -> resolves to latest unstable tag from default repo
+        - 'unstable-43.20260326.1' -> resolves to full URL with default repo
+        - 'bazzite-nix-nvidia-open:testing' -> resolves to latest testing tag from specified repo variant
+        - 'bazzite-nix-nvidia-open:unstable-43.20260326.1' -> full URL with specified repo
+        - Full URLs (with ://) are returned as-is
+
+        Shows confirmation prompt unless skip_confirmation is True.
+
+        Args:
+            tag_or_url: The tag or URL to resolve
+            skip_confirmation: If True, skip the confirmation prompt
+
+        Returns:
+            The resolved full URL, or None if resolution failed/cancelled
+        """
+        from .config import get_config
+        from .system import extract_repository_from_url
+
+        config = get_config()
+
+        # Get the base repository from the default URL (e.g., 'wombatfromhell/bazzite-nix')
+        default_url = config.container_urls.default
+        base_repository = extract_repository_from_url(default_url)
+
+        # If it looks like a full URL (contains :// or starts with registry), return as-is
+        if "://" in tag_or_url or tag_or_url.startswith(
+            ("ghcr.io/", "docker.io/", "quay.io/", "gcr.io/")
+        ):
+            return tag_or_url
+
+        # Check for repo suffix syntax: 'repo-suffix:tag'
+        # e.g., 'bazzite-nix-nvidia-open:testing'
+        repository = base_repository
+        tag_part = tag_or_url
+        repo_explicitly_specified = False
+
+        if ":" in tag_or_url:
+            # Split on the first colon to get repo suffix and tag
+            parts = tag_or_url.split(":", 1)
+            repo_suffix = parts[0]
+            tag_part = parts[1]
+
+            # If repo_suffix contains a slash, it's a full repo path
+            if "/" in repo_suffix:
+                repository = repo_suffix
+                repo_explicitly_specified = True
+            else:
+                # Otherwise, it's a repo name (with optional suffix) to use with the base owner
+                # e.g., base='wombatfromhell/bazzite-nix' + suffix='nvidia-open'
+                # -> 'wombatfromhell/bazzite-nix-nvidia-open'
+                # OR base='wombatfromhell/bazzite-nix' + suffix='bazzite-nix-nvidia-open'
+                # -> 'wombatfromhell/bazzite-nix-nvidia-open'
+                # Extract the owner from the base repository
+                if "/" in base_repository:
+                    owner, _ = base_repository.split("/", 1)
+                    # Use the repo_suffix as the full repo name with the base owner
+                    repository = f"{owner}/{repo_suffix}"
+                else:
+                    # No owner in base, use repo_suffix as-is
+                    repository = repo_suffix
+                repo_explicitly_specified = True
+
+        # Check if this is a primary alias for the default repository
+        # For default repo (wombatfromhell/bazzite-nix), aliases like 'testing' and 'unstable'
+        # are maintained by the registry and point to the latest version
+        # In this case, use the alias directly without client-side resolution
+        #
+        # Primary aliases are tags that match the default tag pattern for a repository
+        # (e.g., 'testing', 'unstable', 'stable' for bazzite-nix)
+        # These are maintained by the registry and always point to the latest version
+        is_primary_alias = (
+            not repo_explicitly_specified
+            and repository == base_repository
+            and tag_part in ("testing", "unstable", "stable", "latest")
+        )
+
+        if is_primary_alias:
+            # Use the alias directly - registry maintains the pointer
+            # Still show confirmation since repo is implicit
+            if not skip_confirmation:
+                full_url = f"ghcr.io/{repository}:{tag_part}"
+                print(f"Using target: {full_url}")
+                try:
+                    from .menu import get_user_input
+
+                    response = get_user_input(
+                        f'Confirm rebase to "{tag_part}"? [y/N]: '
+                    )
+                    if response.lower() != "y":
+                        print("Rebase cancelled.")
+                        sys.exit(0)
+                        return None
+                except KeyboardInterrupt:
+                    print("\nRebase cancelled.")
+                    sys.exit(0)
+                    return None
+
+            return f"ghcr.io/{repository}:{tag_part}"
+
+        # Check if we need to resolve a short tag to the latest version
+        # For primary aliases on the default repo, we use the registry pointer directly
+        # For explicitly specified repos, we still resolve to find the latest version
+        needs_resolution = not re.search(r"-\d+\.\d+", tag_part)
+
+        if needs_resolution:
+            # This is a short tag like 'unstable', 'stable', 'testing'
+            # Fetch available tags and find matches
+            # Create OCI client and fetch tags
+            client = OCIClient(repository)
+            tags_data = client.fetch_repository_tags(f"ghcr.io/{repository}")
+
+            if not tags_data or "tags" not in tags_data:
+                logger.error(f"Could not fetch tags for {repository}")
+                print(f"Error: Could not fetch tags for {repository}")
+                sys.exit(1)
+                return None
+
+            all_tags = tags_data["tags"]
+
+            # Find tags that start with the short tag followed by '-' or match exactly
+            # e.g., 'unstable' matches 'unstable-43.20260326.1', 'unstable-43.20260325.0', etc.
+            matching_tags = []
+            for t in all_tags:
+                if t == tag_part or t.startswith(f"{tag_part}-"):
+                    matching_tags.append(t)
+
+            if not matching_tags:
+                print(f"Error: No tags found matching '{tag_part}'")
+                sys.exit(1)
+                return None
+
+            # Sort tags to get the latest version first
+            # Tags are expected to be in format: <context>-<XX>.<YYYYMMDD>.<SUBVER>
+            # Sort by the version part (after the context prefix)
+            def extract_version_for_sort(t: str) -> tuple:
+                """Extract version tuple for sorting (series, date, subver)."""
+                # Remove context prefix if present
+                version_part = t
+                for prefix in ["unstable-", "stable-", "testing-", "latest."]:
+                    if t.startswith(prefix):
+                        version_part = t[len(prefix) :]
+                        break
+
+                # Parse version: XX.YYYYMMDD.SUBVER or XX.YYYYMMDD or YYYYMMDD.SUBVER
+                parts = version_part.split(".")
+                try:
+                    if len(parts) >= 3:
+                        series = int(parts[0])
+                        date = int(parts[1])
+                        subver = int(parts[2]) if parts[2].isdigit() else 0
+                    elif len(parts) == 2:
+                        # Could be XX.YYYYMMDD or YYYYMMDD.SUBVER
+                        if len(parts[0]) == 8 and parts[0].isdigit():
+                            # YYYYMMDD format
+                            series = 0
+                            date = int(parts[0])
+                            subver = int(parts[1]) if parts[1].isdigit() else 0
+                        else:
+                            series = int(parts[0])
+                            date = int(parts[1])
+                            subver = 0
+                    elif len(parts) == 1 and parts[0].isdigit():
+                        # Just a number
+                        series = 0
+                        date = int(parts[0])
+                        subver = 0
+                    else:
+                        series = 0
+                        date = 0
+                        subver = 0
+                except (ValueError, IndexError):
+                    series = 0
+                    date = 0
+                    subver = 0
+
+                return (series, date, subver)
+
+            # Sort descending (latest first)
+            matching_tags.sort(key=extract_version_for_sort, reverse=True)
+            latest_tag = matching_tags[0]
+
+            # Build the full URL
+            full_url = f"ghcr.io/{repository}:{latest_tag}"
+
+            # Show confirmation if there are multiple matches or if skip_confirmation is False
+            if len(matching_tags) > 1 and not skip_confirmation:
+                print(f"Tag '{tag_part}' matches {len(matching_tags)} available tags:")
+                for t in matching_tags[:10]:  # Show first 10
+                    print(f"  - {t}")
+                if len(matching_tags) > 10:
+                    print(f"  ... and {len(matching_tags) - 10} more")
+                print(f"\nResolving to: {latest_tag}")
+
+                try:
+                    from .menu import get_user_input
+
+                    response = get_user_input(
+                        f"Confirm rebase to {latest_tag}? [y/N]: "
+                    )
+                    if response.lower() != "y":
+                        print("Rebase cancelled.")
+                        sys.exit(0)
+                        return None
+                except KeyboardInterrupt:
+                    print("\nRebase cancelled.")
+                    sys.exit(0)
+                    return None
+            elif not skip_confirmation:
+                # Single match, still confirm
+                print(f"Resolving '{tag_part}' to: {latest_tag}")
+                try:
+                    from .menu import get_user_input
+
+                    response = get_user_input(
+                        f"Confirm rebase to {latest_tag}? [y/N]: "
+                    )
+                    if response.lower() != "y":
+                        print("Rebase cancelled.")
+                        sys.exit(0)
+                        return None
+                except KeyboardInterrupt:
+                    print("\nRebase cancelled.")
+                    sys.exit(0)
+                    return None
+
+            return full_url
+        else:
+            # This is a complete tag like 'unstable-43.20260326.1'
+            # Just add the repository prefix, but confirm if repo was implicit
+            full_url = f"ghcr.io/{repository}:{tag_part}"
+
+            # Show confirmation if repository was not explicitly specified
+            if not repo_explicitly_specified and not skip_confirmation:
+                print(f"Using target: {full_url}")
+                try:
+                    from .menu import get_user_input
+
+                    response = get_user_input(
+                        f'Confirm rebase to "{tag_part}"? [y/N]: '
+                    )
+                    if response.lower() != "y":
+                        print("Rebase cancelled.")
+                        sys.exit(0)
+                        return None
+                except KeyboardInterrupt:
+                    print("\nRebase cancelled.")
+                    sys.exit(0)
+                    return None
+
+            return full_url
 
     def _handle_remote_ls(self, args: List[str]) -> None:
         """Handle the remote-ls command."""
