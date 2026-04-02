@@ -1,3 +1,4 @@
+.container-home
 .ruff_cache
 .pytest_cache
 .venv
@@ -7,6 +8,7 @@ __pycache__
 dist
 
 .coverage
+Containerfile.dev
 
 # Deterministic build staging
 staging
