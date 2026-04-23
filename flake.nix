@@ -22,27 +22,27 @@
         devShells.default = pkgs.mkShell {
           name = "urh";
 
-          buildInputs = [
+          packages = with pkgs; [
+            bashInteractive
+            coreutils
+            findutils
+            git
+            gnugrep
+            gnutar
+            gnused
+            gawk
+            jq
+            less
+            mbake
+            prettier
             python
-            pkgs.uv
-            pkgs.mbake
-            pkgs.ruff
-            pkgs.prettier
-            pkgs.ty
-            pkgs.zip
-            pkgs.rsync
-            pkgs.gnused
-            pkgs.gnugrep
-            pkgs.coreutils
-            pkgs.prettier
-            pkgs.gnutar
-            pkgs.which
-            pkgs.gawk
-            pkgs.jq
-            pkgs.util-linux # provides readlink, blockdev, etc.
-            pkgs.git # git commands in shell hooks
-            pkgs.less # pager
-            pkgs.findutils # find, locate, updatedb
+            ruff
+            rsync
+            ty
+            uv
+            util-linux
+            which
+            zip
           ];
           shellHook = ''
             export PYTHON=${python}/bin/python3
