@@ -219,75 +219,51 @@ class OCITagFilter:
     def _sort_tags(self, tags: List[str]) -> List[str]:
         """Sort tags based on version patterns."""
 
+        def _extract_date_parts(
+            match, date_group: int, subver_group: Optional[int] = None
+        ) -> tuple[int, int, int, int]:
+            """Extract (year, month, day, subver) from a regex match."""
+            date_str = match.group(date_group)
+            year = int(date_str[:4])
+            month = int(date_str[4:6])
+            day = int(date_str[6:8])
+            subver = (
+                int(match.group(subver_group))
+                if subver_group and match.group(subver_group)
+                else 0
+            )
+            return (year, month, day, subver)
+
         def version_key(tag: str) -> VersionSortKey:
-            # Handle context-prefixed version tags (testing-XX.YYYYMMDD, etc.)
-            context_version_match = re.match(
+            # Context-prefixed version tags (testing-XX.YYYYMMDD.SUBVER)
+            m = re.match(
                 r"^(testing|stable|unstable)-(\d{2})\.(\d{8})(?:\.(\d+))?$", tag
             )
-            if context_version_match:
-                series = int(context_version_match.group(2))
-                year, month, day = (
-                    int(context_version_match.group(3)[:4]),
-                    int(context_version_match.group(3)[4:6]),
-                    int(context_version_match.group(3)[6:8]),
-                )
-                subver = (
-                    int(context_version_match.group(4))
-                    if context_version_match.group(4)
-                    else 0
-                )
-                # Prefixed tags get priority over non-prefixed for same date
-                # Using tuple of 5 elements: (year, month, day, subver, priority * 10000 + series)
+            if m:
+                year, month, day, subver = _extract_date_parts(m, 3, 4)
+                series = int(m.group(2))
                 return (year, month, day, subver, 10000 + series)
 
-            # Handle context-prefixed date-only tags (testing-YYYYMMDD, etc.)
-            context_date_match = re.match(
-                r"^(testing|stable|unstable)-(\d{8})(?:\.(\d+))?$", tag
-            )
-            if context_date_match:
-                year, month, day = (
-                    int(context_date_match.group(2)[:4]),
-                    int(context_date_match.group(2)[4:6]),
-                    int(context_date_match.group(2)[6:8]),
-                )
-                subver = (
-                    int(context_date_match.group(3))
-                    if context_date_match.group(3)
-                    else 0
-                )
-                # Prefixed date-only tags get priority
-                # Using tuple of 5 elements: (year, month, day, subver, priority)
+            # Context-prefixed date-only tags (testing-YYYYMMDD.SUBVER)
+            m = re.match(r"^(testing|stable|unstable)-(\d{8})(?:\.(\d+))?$", tag)
+            if m:
+                year, month, day, subver = _extract_date_parts(m, 2, 3)
                 return (year, month, day, subver, 10000)
 
-            # Handle version format tags (XX.YYYYMMDD.SUBVER)
-            version_match = re.match(r"^(\d{2})\.(\d{8})(?:\.(\d+))?$", tag)
-            if version_match:
-                series = int(version_match.group(1))
-                year, month, day = (
-                    int(version_match.group(2)[:4]),
-                    int(version_match.group(2)[4:6]),
-                    int(version_match.group(2)[6:8]),
-                )
-                subver = int(version_match.group(3)) if version_match.group(3) else 0
-                # Non-prefixed tags get lower priority
-                # Using tuple of 5 elements: (year, month, day, subver, priority * 10000 + series)
-                return (year, month, day, subver, series)  # priority 0, so just series
+            # Version format tags (XX.YYYYMMDD.SUBVER)
+            m = re.match(r"^(\d{2})\.(\d{8})(?:\.(\d+))?$", tag)
+            if m:
+                year, month, day, subver = _extract_date_parts(m, 2, 3)
+                series = int(m.group(1))
+                return (year, month, day, subver, series)
 
-            # Handle date format tags (YYYYMMDD)
-            date_match = re.match(r"^(\d{8})(?:\.(\d+))?$", tag)
-            if date_match:
-                year, month, day = (
-                    int(date_match.group(1)[:4]),
-                    int(date_match.group(1)[4:6]),
-                    int(date_match.group(1)[6:8]),
-                )
-                subver = int(date_match.group(2)) if date_match.group(2) else 0
-                # Non-prefixed date tags get lower priority
-                # Using tuple of 5 elements: (year, month, day, subver, priority)
+            # Date format tags (YYYYMMDD.SUBVER)
+            m = re.match(r"^(\d{8})(?:\.(\d+))?$", tag)
+            if m:
+                year, month, day, subver = _extract_date_parts(m, 1, 2)
                 return (year, month, day, subver, 0)
 
-            # For all other tags, use alphabetical sorting
-            # Using AlphaVersionKey format: (priority, tuple of character codes)
+            # Alphabetical sorting for other tags
             return (-1, tuple(ord(c) for c in tag))
 
         return sorted(tags, key=version_key, reverse=True)

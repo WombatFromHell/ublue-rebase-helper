@@ -3,10 +3,10 @@ CLI module for ublue-rebase-helper.
 """
 
 import logging
-import os
 import sys
+from typing import List, Optional
 
-from .commands import CommandRegistry
+from .commands.registry import CommandRegistry
 from .config import get_config
 from .constants import __version__, format_version_header
 from .deployment import (
@@ -25,7 +25,86 @@ def setup_logging(debug: bool = False) -> None:
     )
 
 
-def _main_menu_loop(registry: CommandRegistry) -> None:
+def _show_help() -> None:
+    """Display help message with available commands and options."""
+    print(f"ublue-rebase-helper v{__version__}")
+    print("\nUsage: urh [command] [options]")
+    print("\nAvailable commands:")
+    registry = CommandRegistry()
+    for cmd in registry.get_commands():
+        print(f"  {cmd.name} - {cmd.description}")
+    print("\nOptions:")
+    print("  --version, -V  Show version information")
+    print("  --help, -h     Show this help message")
+    print("  -y, --yes      Skip confirmation prompts (for rebase command)")
+
+
+def _handle_version_flag() -> bool:
+    """Check for --version/-V flag. Returns True if flag was handled."""
+    if len(sys.argv) == 2 and sys.argv[1] in ("--version", "-V"):
+        print(f"ublue-rebase-helper v{__version__}")
+        return True
+    return False
+
+
+def _handle_help_flag() -> bool:
+    """Check for --help/-h flag. Returns True if flag was handled."""
+    if len(sys.argv) == 2 and sys.argv[1] in ("--help", "-h"):
+        _show_help()
+        return True
+    return False
+
+
+def _check_dependencies() -> Optional[CommandRegistry]:
+    """Check dependencies and return registry, or exit if missing.
+
+    Returns:
+        CommandRegistry instance if curl is available, None otherwise.
+    """
+    config = get_config()
+    setup_logging(debug=config.settings.debug_mode)
+
+    if not check_curl_presence():
+        logger = logging.getLogger(__name__)
+        logger.error("curl is required for this application but was not found.")
+        print("Error: curl is required for this application but was not found.")
+        print("Please install curl and try again.")
+        return None
+
+    return CommandRegistry()
+
+
+def _execute_command(
+    registry: CommandRegistry, command_name: str, command_args: List[str]
+) -> int:
+    """Execute a command by name with given arguments.
+
+    Returns:
+        Exit code from command handler.
+    """
+    # Parse global flags like -y/--yes
+    skip_confirmation = False
+    if "-y" in command_args or "--yes" in command_args:
+        skip_confirmation = True
+        command_args = [arg for arg in command_args if arg not in ("-y", "--yes")]
+
+    command = registry.get_command(command_name)
+
+    if command:
+        if command_name == "rebase":
+            return command.handler(
+                command_args,
+                skip_confirmation=skip_confirmation,  # type: ignore[unknown-argument]
+            )
+        else:
+            return command.handler(command_args)
+    else:
+        print(f"Unknown command: {command_name}")
+        _show_help()
+        return 1
+
+
+def _main_menu_loop(registry: CommandRegistry) -> int:
     """Main menu functionality that shows the menu and executes commands."""
     # Get current deployment info for persistent header
     deployment_info = get_current_deployment_info()
@@ -39,123 +118,55 @@ def _main_menu_loop(registry: CommandRegistry) -> None:
 
     items = [MenuItem(cmd.name, cmd.description) for cmd in sorted_commands]
 
-    selected = registry._menu_system.show_menu(
-        items,
-        "Select a command (ESC to exit):",
-        persistent_header=persistent_header,
-        is_main_menu=True,
-    )
+    while True:
+        selected = registry._menu_system.show_menu(
+            items,
+            "Select a command (ESC to exit):",
+            persistent_header=persistent_header,
+            is_main_menu=True,
+        )
 
-    if selected is None:
-        # In text mode, if no selection is made, return to allow main to loop
-        return
+        if selected is None:
+            # In text mode, if no selection is made, return to allow main to loop
+            return 0
 
-    # Execute the selected command
-    command = registry.get_command(selected)
-    if command:
-        # Execute the command, which may raise MenuExitException
-        command.handler([])
+        # Execute the selected command
+        command = registry.get_command(selected)
+        if command:
+            try:
+                # Execute the command
+                result = command.handler([])
+                # Command completed successfully, exit the menu loop
+                return result
+            except MenuExitException as e:
+                # ESC pressed in submenu, return to main menu
+                if not e.is_main_menu:
+                    continue
+                raise  # ESC in main menu, exit
+        return 0
 
 
 def main():
-    """
-    Main entry point for the CLI.
-    """
+    """Main entry point for the CLI."""
     # Handle --version/-V and --help/-h flags
-    if len(sys.argv) == 2:
-        if sys.argv[1] in ("--version", "-V"):
-            print(f"ublue-rebase-helper v{__version__}")
-            sys.exit(0)
-        if sys.argv[1] in ("--help", "-h"):
-            print(f"ublue-rebase-helper v{__version__}")
-            print("\nUsage: urh [command] [options]")
-            print("\nAvailable commands:")
-            registry = CommandRegistry()
-            for cmd in registry.get_commands():
-                print(f"  {cmd.name} - {cmd.description}")
-            print("\nOptions:")
-            print("  --version, -V  Show version information")
-            print("  --help, -h     Show this help message")
-            print("  -y, --yes      Skip confirmation prompts (for rebase command)")
-            sys.exit(0)
+    if _handle_version_flag():
+        return 0
+    if _handle_help_flag():
+        return 0
 
-    # Setup logging based on config
-    config = get_config()
-    setup_logging(debug=config.settings.debug_mode)
+    # Check dependencies
+    registry = _check_dependencies()
+    if registry is None:
+        return 1
 
-    # Check if curl is available before proceeding
-    if not check_curl_presence():
-        logger = logging.getLogger(__name__)
-        logger.error("curl is required for this application but was not found.")
-        print("Error: curl is required for this application but was not found.")
-        print("Please install curl and try again.")
-        sys.exit(1)
+    # Parse command line arguments
+    if len(sys.argv) < 2:
+        try:
+            return _main_menu_loop(registry)
+        except MenuExitException:
+            return 0
     else:
-        # Only continue execution if curl is available
-        # Create command registry
-        registry = CommandRegistry()
-
-        # Parse command line arguments
-        if len(sys.argv) < 2:
-            # Check if we're in a test environment to avoid infinite loop
-            in_test_environment = "PYTEST_CURRENT_TEST" in os.environ
-
-            # Show main menu in a loop to return to main menu after submenu ESC
-            # But don't loop infinitely in test environments
-            while True:
-                try:
-                    _main_menu_loop(registry)
-                    # If in test environment, break after one iteration
-                    if in_test_environment:
-                        return
-                except MenuExitException as e:
-                    if e.is_main_menu:
-                        sys.exit(0)
-                        # If sys.exit is mocked in tests, we still need to exit the function
-                        return  # Exit the main function to stop the loop
-                    else:
-                        # When ESC is pressed in a submenu, continue the loop to show main menu again
-                        # unless we're in a test environment
-                        if in_test_environment:
-                            return
-                        continue
-        else:
-            # Execute command directly
-            command_name = sys.argv[1]
-            command_args = sys.argv[2:]
-
-            # Parse global flags like -y/--yes
-            skip_confirmation = False
-            if "-y" in command_args or "--yes" in command_args:
-                skip_confirmation = True
-                command_args = [
-                    arg for arg in command_args if arg not in ("-y", "--yes")
-                ]
-
-            command = registry.get_command(command_name)
-
-            if command:
-                # Pass remaining arguments to the command handler
-                # For rebase command, pass skip_confirmation as keyword argument
-                if command_name == "rebase":
-                    # Use **kwargs style to pass skip_confirmation
-                    command.handler(command_args, skip_confirmation=skip_confirmation)  # type: ignore[call-arg]
-                else:
-                    command.handler(command_args)
-            else:
-                print(f"Unknown command: {command_name}")
-                print(f"\nublue-rebase-helper v{__version__}")
-                print("\nUsage: urh [command] [options]")
-                print("\nAvailable commands:")
-                for cmd in registry.get_commands():
-                    print(f"  {cmd.name} - {cmd.description}")
-                print("\nOptions:")
-                print("  --version, -V  Show version information")
-                print("  --help, -h     Show this help message")
-                sys.exit(1)
-
-    # Return successful exit code
-    return 0
+        return _execute_command(registry, sys.argv[1], sys.argv[2:])
 
 
 if __name__ == "__main__":

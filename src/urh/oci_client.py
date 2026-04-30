@@ -5,22 +5,13 @@ OCI client implementation for ublue-rebase-helper.
 import json
 import logging
 import subprocess
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .config import get_config
 from .system import extract_context_from_url
 
 # Set up logging
 logger = logging.getLogger(__name__)
-
-
-class CurlResult(NamedTuple):
-    """Result of a curl operation."""
-
-    stdout: str
-    stderr: str
-    returncode: int
-    headers: Optional[Dict[str, str]] = None
 
 
 class OCIClient:
@@ -35,204 +26,6 @@ class OCIClient:
         from .token_manager import OCITokenManager
 
         self.token_manager = OCITokenManager(repository, cache_path)
-
-    def _build_curl_command_with_options(
-        self,
-        url: str,
-        token: str,
-        *,
-        capture_headers: bool = False,
-        capture_body: bool = True,
-        capture_status_code: bool = False,
-        timeout: int = 30,
-    ) -> List[str]:
-        """Build curl command with various options."""
-        cmd = [
-            "curl",
-            "-s",
-            "--http2",
-            "--max-time",
-            str(timeout),
-            "--globoff",
-            "--compressed",
-        ]
-
-        if capture_status_code:
-            # Write HTTP status code to stdout
-            cmd.extend(["-w", "%{http_code}"])
-
-        if capture_headers:
-            # Use -i to include headers in output
-            cmd.append("-i")
-
-        if not capture_body and not capture_status_code:
-            cmd.extend(["-o", "/dev/null"])
-
-        cmd.extend(["-H", f"Authorization: Bearer {token}", url])
-        return cmd
-
-    def _handle_curl_errors(self, error: Exception) -> CurlResult:
-        """Handle curl execution errors."""
-        if isinstance(error, subprocess.TimeoutExpired):
-            # Return an error result when timeout occurs
-            return CurlResult("", "Command timed out", 124)
-        elif isinstance(error, FileNotFoundError):
-            # Return an error result when curl is not found
-            return CurlResult("", "Command not found", 1)
-        else:
-            # Return a generic error result
-            return CurlResult("", str(error), 1)
-
-    def _extract_headers_from_response(
-        self, stdout: str, capture_headers: bool, capture_status_code: bool
-    ) -> tuple[str, Optional[Dict[str, str]]]:
-        """Extract headers from curl response if needed."""
-        headers = None
-
-        if capture_headers and not capture_status_code:
-            # Split headers and body
-            parts = stdout.split("\r\n\r\n", 1)
-            if len(parts) == 2:
-                headers = self._parse_headers(parts[0])
-                stdout = parts[1]
-
-        return stdout, headers
-
-    def _curl(
-        self,
-        url: str,
-        token: str,
-        *,
-        capture_headers: bool = False,
-        capture_body: bool = True,
-        capture_status_code: bool = False,
-        timeout: int = 30,
-    ) -> CurlResult:
-        """Unified curl wrapper with optional header capture."""
-        try:
-            # Build curl command
-            cmd = self._build_curl_command_with_options(
-                url,
-                token,
-                capture_headers=capture_headers,
-                capture_body=capture_body,
-                capture_status_code=capture_status_code,
-                timeout=timeout,
-            )
-
-            # Execute curl command
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,  # Don't raise exception on non-zero exit
-            )
-
-            # Extract headers if needed
-            stdout, headers = self._extract_headers_from_response(
-                result.stdout, capture_headers, capture_status_code
-            )
-
-            return CurlResult(stdout, result.stderr, result.returncode, headers)
-
-        except Exception as error:
-            # Handle any errors that occur during curl execution
-            return self._handle_curl_errors(error)
-
-    def _parse_headers(self, header_text: str) -> Dict[str, str]:
-        """Parse HTTP headers from text."""
-        headers: Dict[str, str] = {}
-        for line in header_text.split("\r\n"):
-            if ":" in line:
-                key, value = line.split(":", 1)
-                headers[key.strip()] = value.strip()
-        return headers
-
-    def _validate_token_and_retry(self, token: str, url: str) -> Optional[str]:
-        """
-        Validate the token and retry with a new token if it's expired.
-
-        Args:
-            token: The current token to validate
-            url: The URL to test the token against
-
-        Returns:
-            A valid token if successful, None otherwise
-        """
-        try:
-            # Test the current token with a HEAD-like request
-            cmd = [
-                "curl",
-                "-s",
-                "--http2",
-                "--compressed",
-                "-w",
-                "%{http_code}",  # Write HTTP status code
-                "-o",
-                "/dev/null",  # Discard body
-                "-H",
-                f"Authorization: Bearer {token}",
-                url,
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            )
-
-            http_status = int(result.stdout.strip())
-
-            # Token is valid
-            if http_status == 200:
-                logger.debug("Token validation successful")
-                return token
-
-            # Token expired or invalid
-            if http_status == 403 or http_status == 401:
-                logger.debug(
-                    f"Token invalid (HTTP {http_status}). Fetching new token..."
-                )
-                self.token_manager.invalidate_cache()
-
-                # Get new token
-                new_token = self.token_manager.get_token()
-                if not new_token:
-                    logger.error("Could not obtain a new token")
-                    return None
-
-                # Validate new token
-                cmd[cmd.index(f"Authorization: Bearer {token}")] = (
-                    f"Authorization: Bearer {new_token}"
-                )
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    timeout=30,
-                )
-
-                http_status = int(result.stdout.strip())
-                if http_status == 200:
-                    logger.debug("New token validated successfully")
-                    return new_token
-                else:
-                    logger.error(f"New token also invalid (HTTP {http_status})")
-                    return None
-
-            # Other HTTP status
-            logger.debug(f"Unexpected HTTP status during validation: {http_status}")
-            return token  # Try to continue anyway
-
-        except subprocess.TimeoutExpired:
-            logger.error("Timeout during token validation")
-            return None
-        except Exception as e:
-            logger.error(f"Error during token validation: {e}")
-            return None
 
     def _validate_token(self) -> Optional[str]:
         """Get and validate authentication token."""
@@ -470,20 +263,14 @@ class OCIClient:
             cmd = self._build_curl_command(url, token)
             result = self._execute_curl_command(cmd)
 
-            parse_result = self._parse_http_response(result.stdout)
-            if not self._validate_parse_result(parse_result):
+            status_line, body, headers = self._parse_http_response(result.stdout)
+            if status_line is None or body is None or headers is None:
                 return None, None
 
-            status_line, body, headers = parse_result
+            logger.debug(f"HTTP Status: {status_line}")
 
-            if status_line:
-                self._log_http_status(status_line)
-
-            auth_error_result = (
-                self._check_auth_error(status_line, url, token) if status_line else None
-            )
-            if auth_error_result is not None:
-                return auth_error_result
+            if auth_result := self._check_auth_error(status_line, url, token):
+                return auth_result
 
             next_url = self._extract_next_url(headers)
             data = self._parse_response_body(body) if body else None
@@ -491,14 +278,16 @@ class OCIClient:
             if data is None:
                 return None, None
 
-            self._log_pagination_status(next_url)
+            logger.debug(f"Fetched tags, has_next: {next_url is not None}")
 
             return data, next_url
 
         except subprocess.TimeoutExpired:
-            return self._handle_fetch_timeout(url)
+            logger.error(f"Timeout fetching page: {url}")
+            return None, None
         except Exception as e:
-            return self._handle_fetch_error(e)
+            logger.error(f"Error fetching page: {e}")
+            return None, None
 
     def _execute_curl_command(self, cmd: List[str]) -> subprocess.CompletedProcess[str]:
         """Execute curl command and return result."""
@@ -509,21 +298,6 @@ class OCIClient:
             check=True,
             timeout=30,
         )
-
-    def _validate_parse_result(
-        self,
-        parse_result: Tuple[Optional[str], Optional[str], Optional[Dict[str, str]]],
-    ) -> bool:
-        """Validate that parse result contains all required components."""
-        return (
-            parse_result[0] is not None
-            and parse_result[1] is not None
-            and parse_result[2] is not None
-        )
-
-    def _log_http_status(self, status_line: str) -> None:
-        """Log HTTP status for debugging."""
-        logger.debug(f"HTTP Status: {status_line}")
 
     def _check_auth_error(
         self, status_line: str, url: str, token: str
@@ -539,30 +313,3 @@ class OCIClient:
         return (
             self.token_manager.parse_link_header(link_header) if link_header else None
         )
-
-    def _log_pagination_status(self, next_url: Optional[str]) -> None:
-        """Log pagination status."""
-        logger.debug(f"Fetched tags, has_next: {next_url is not None}")
-
-    def _handle_fetch_timeout(
-        self, url: str
-    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
-        """Handle fetch timeout."""
-        logger.error(f"Timeout fetching page: {url}")
-        return None, None
-
-    def _handle_fetch_error(
-        self, e: Exception
-    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
-        """Handle general fetch errors."""
-        logger.error(f"Error fetching page: {e}")
-        return None, None
-
-    def _parse_link_header(self, link_header: Optional[str]) -> Optional[str]:
-        """
-        Parse the Link header to extract the next URL.
-        Note: This method matches the signature expected by tests but is redundant
-        with the token manager's parse_link_header method. This is kept for
-        test compatibility.
-        """
-        return self.token_manager.parse_link_header(link_header)

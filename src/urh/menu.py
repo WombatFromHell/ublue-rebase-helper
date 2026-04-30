@@ -8,6 +8,7 @@ import subprocess
 import sys
 from typing import Any, Callable, List, Optional, Sequence
 
+from .constants import PYTEST_CURRENT_TEST, URH_AVOID_GUM, URH_TEST_NO_EXCEPTION
 from .models import GumCommand, MenuItem
 
 # Set up logging
@@ -55,7 +56,7 @@ class MenuSystem:
     ) -> Optional[Any]:
         """Show a menu and return the selected value."""
         # Check if we should force non-gum behavior (e.g., to avoid hanging during tests)
-        force_non_gum = os.environ.get("URH_AVOID_GUM", "").lower() in (
+        force_non_gum = os.environ.get(URH_AVOID_GUM, "").lower() in (
             "1",
             "true",
             "yes",
@@ -159,12 +160,12 @@ class MenuSystem:
     def _handle_esc_pressed(self, is_main_menu: bool) -> Optional[Any]:
         """Handle ESC key press in gum menu."""
         # Check if we're in a test that expects different behavior
-        if "URH_TEST_NO_EXCEPTION" in os.environ:
+        if URH_TEST_NO_EXCEPTION in os.environ:
             print("No option selected.")
             return None
         else:
             # Clear the line in non-test environments
-            if "PYTEST_CURRENT_TEST" not in os.environ:
+            if PYTEST_CURRENT_TEST not in os.environ:
                 sys.stdout.write("\033[F\033[K")
                 sys.stdout.flush()
 

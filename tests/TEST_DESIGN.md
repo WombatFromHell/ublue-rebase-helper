@@ -8,6 +8,8 @@
 
 - [Design Philosophy](#design-philosophy)
 - [Test Organization](#test-organization)
+- [Code Navigation Map](#code-navigation-map)
+- [Fixture Dependency Graph](#fixture-dependency-graph)
 - [What We Test](#what-we-test)
 - [What We Avoid](#what-we-avoid)
 - [Using Centralized Fixtures](#using-centralized-fixtures)
@@ -35,9 +37,9 @@
 def test_check_command_executes_rpm_ostree(mocker):
     mock_run = mocker.patch("subprocess.run")
     mock_run.return_value = mocker.MagicMock(returncode=0)
-    
+
     cli_main()  # Test actual CLI entry point
-    
+
     mock_run.assert_called_with(["rpm-ostree", "upgrade", "--check"])
 
 # ❌ WRONG: Mocking the SUT (command handler)
@@ -56,11 +58,13 @@ tests/
 ├── e2e/                     # End-to-end workflow tests
 │   ├── test_cli_workflows.py    # CLI entry point + command execution
 │   ├── test_menu_navigation.py  # Menu system + command selection
-│   └── test_remote_operations.py # OCI client + tag filtering
+│   ├── test_remote_operations.py # OCI client + tag filtering
+│   └── test_rebase_workflows.py  # Rebase tag resolution, confirmation, custom repos
 └── integration/             # Integration tests (module interactions)
     ├── test_command_handlers.py # Command registry + handlers
     ├── test_config_system.py    # Config loading + validation
     ├── test_deployment_ops.py   # Deployment info + menu integration
+    ├── test_menu_system.py      # Menu system logic (TTY/non-TTY)
     └── test_oci_client.py       # OCI client HTTP/pagination/auth logic
 ```
 
@@ -80,19 +84,175 @@ tests/
 
 ---
 
+## Code Navigation Map
+
+### Test File Index
+
+| File                                   | Tests | Classes                                                                                                                                                                                      | Focus                                                                       |
+| -------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `e2e/test_cli_workflows.py`            | 18    | `TestCLIDirectCommandExecution`, `TestCLIErrorHandling`, `TestCLIArgumentParsing`                                                                                                            | Direct CLI commands, error handling, arg parsing                            |
+| `e2e/test_menu_navigation.py`          | 18    | `TestMainMenuNavigation`, `TestSubmenuNavigation`, `TestDeploymentSelectionMenus`, `TestMenuHeaderDisplay`                                                                                   | Menu workflows, ESC handling, deployment selection                          |
+| `e2e/test_remote_operations.py`        | 9     | `TestRemoteLsCommand`, `TestOCIClientIntegration`, `TestTokenManagerIntegration`                                                                                                             | OCI remote-ls workflows, token caching                                      |
+| `e2e/test_rebase_workflows.py`         | 25    | `TestRebaseTagResolution`, `TestRebaseRepoSuffix`, `TestRebaseConfirmation`, `TestRebaseCustomRepository`                                                                                    | Tag resolution, repo suffix syntax, confirmation prompts, -y flag           |
+| `integration/test_command_handlers.py` | 44    | `TestCommandRegistry`, `TestSimpleCommandHandlers`, `TestKargsCommand`, `TestRebaseCommand`, `TestRemoteLsCommand`, `TestDeploymentCommands`                                                 | Registry, kargs subcommands, rebase/remote-ls handlers, deployment commands |
+| `integration/test_config_system.py`    | 33    | `TestURHConfigDefaults`, `TestRepositoryConfigValidation`, `TestSettingsConfigValidation`, `TestConfigManagerLoading`, `TestConfigParsing`, `TestCreateDefaultConfig`, `TestGlobalGetConfig` | Config defaults, validation, TOML parsing, serialization                    |
+| `integration/test_deployment_ops.py`   | 21    | `TestParseDeploymentInfo`, `TestGetCurrentDeploymentInfo`, `TestGetDeploymentInfo`, `TestFormatDeploymentHeader`, `TestCommandRegistryDeploymentHelpers`, `TestDeploymentInfoDataclass`      | Parsing rpm-ostree output, pin/unpin state, menu items                      |
+| `integration/test_menu_system.py`      | 18    | `TestGumCommand`, `TestMenuSystemNonTTY`, `TestMenuSystemTextMenu`, `TestMenuSystemGumMenu`, `TestMenuSystemESCHandling`                                                                     | Gum command building, TTY/non-TTY modes, ESC handling                       |
+| `integration/test_oci_client.py`       | 22    | `TestOCIClientHTTPResponseParsing`, `TestOCIClientPagination`, `TestOCIClientAuthHandling`, `TestOCIClientJSONParsing`, `TestOCIClientTagFiltering`                                          | HTTP parsing, pagination, auth retries, JSON, tag filtering                 |
+
+**Total: 208 tests (59 E2E + 149 Integration)**
+
+### Class Dependency Quick Reference
+
+```
+TestCLIDirectCommandExecution  ──uses──> apply_e2e_test_environment(tty=False)
+TestCLIErrorHandling           ──uses──> apply_e2e_test_environment(tty=False)
+TestCLIArgumentParsing         ──uses──> apply_e2e_test_environment(tty=False)
+TestMainMenuNavigation         ──uses──> apply_e2e_test_environment(tty=True, mock_execvp=True)
+TestSubmenuNavigation          ──uses──> apply_e2e_test_environment(tty=True, mock_execvp=True)
+TestDeploymentSelectionMenus   ──uses──> apply_e2e_test_environment(tty=True, mock_execvp=True)
+TestMenuHeaderDisplay          ──uses──> apply_e2e_test_environment(tty=True, mock_execvp=True)
+TestRemoteLsCommand(e2e)       ──uses──> apply_e2e_test_environment(tty=False)
+TestOCIClientIntegration       ──uses──> apply_e2e_test_environment(tty=False)
+TestTokenManagerIntegration    ──uses──> apply_e2e_test_environment(tty=False)
+TestRebaseTagResolution        ──uses──> apply_e2e_test_environment(tty=False, custom deployment_info)
+TestRebaseRepoSuffix           ──uses──> apply_e2e_test_environment(tty=False, custom deployment_info)
+TestRebaseConfirmation         ──uses──> apply_e2e_test_environment(tty=False)
+TestRebaseCustomRepository     ──uses──> apply_e2e_test_environment(tty=False, custom deployment_info)
+```
+
+---
+
+## Fixture Dependency Graph
+
+### Fixture Hierarchy
+
+```mermaid
+graph TD
+    subgraph Session["Session-Scoped (expensive, reused)"]
+        SC1["sample_config_data"]
+        SC2["sample_tags_data"]
+        SC3["sample_status_output"]
+        SC4["sample_deployments"]
+        SC5["command_registry"]
+    end
+
+    subgraph Module["Module-Scoped (shared within file)"]
+        MC1["mock_config_for_module_tests"]
+        MC2["oci_client_with_mocks"]
+        MC3["menu_system_with_mocks"]
+    end
+
+    subgraph Function["Function-Scoped (per-test)"]
+        FC1["cli_command"]
+        FC2["mock_rpm_ostree_commands"]
+        FC3["command_sudo_params"]
+    end
+
+    subgraph Helpers["Shared Utilities"]
+        H1["apply_e2e_test_environment"]
+        H2["mock_execvp_command"]
+        H3["_make_mock_process"]
+    end
+
+    SC3 --> SC4
+    MC2 -.-> "subprocess.run"
+    MC3 -.-> "os.isatty"
+    H1 -.-> "subprocess.run"
+    H1 -.-> "os.isatty"
+    H1 -.-> "check_curl_presence"
+    H2 -.-> H1
+```
+
+### E2E Test Setup Flow
+
+```mermaid
+sequenceDiagram
+    participant Test as Test Class
+    participant Autouse as @autouse fixture
+    participant E2E as apply_e2e_test_environment()
+    participant Subprocess as subprocess.run
+    participant TTY as os.isatty
+    participant Curl as check_curl_presence
+    participant Deploy as deployment info mocks
+
+    Test->>Autouse: Test starts
+    Autouse->>E2E: apply_e2e_test_environment(mocker, tty=...)
+    E2E->>Subprocess: Patch with _mock_subprocess handler
+    E2E->>TTY: Patch with tty param
+    E2E->>Curl: Patch to return True
+    E2E->>Deploy: Patch get_current_deployment_info
+    E2E->>Deploy: Patch format_deployment_header
+    Note over E2E,Deploy: Optional: mock_execvp, mock_sys_exit
+```
+
+### Fixture Usage by Test Category
+
+```mermaid
+graph LR
+    subgraph E2E["E2E Tests"]
+        direction TB
+        E1["CLI Workflows"]
+        E2["Menu Navigation"]
+        E3["Remote Operations"]
+        E4["Rebase Workflows"]
+    end
+
+    subgraph Integration["Integration Tests"]
+        direction TB
+        I1["Command Handlers"]
+        I2["Config System"]
+        I3["Deployment Ops"]
+        I4["Menu System"]
+        I5["OCI Client"]
+    end
+
+    E1 -->|"apply_e2e(tty=False)"| Conftest["conftest.py"]
+    E2 -->|"apply_e2e(tty=True, execvp)"| Conftest
+    E3 -->|"apply_e2e(tty=False)"| Conftest
+    E4 -->|"apply_e2e(tty=False, custom deploy)"| Conftest
+    I1 -->|"mock_rpm_ostree_commands"| Conftest
+    I2 -->|"temp_config_file, mock_get_config"| Conftest
+    I3 -->|"sample_deployments, sample_status_output"| Conftest
+    I4 -->|"menu_system_with_mocks"| Conftest
+    I5 -->|"oci_client_with_mocks"| Conftest
+```
+
+### Parametrized Fixture Flow
+
+```mermaid
+graph TD
+    PF["command_sudo_params<br/>(parametrized fixture)"] --> P1["check → False"]
+    PF --> P2["ls → False"]
+    PF --> P3["upgrade → True"]
+    PF --> P4["rollback → True"]
+    PF --> P5["pin → True"]
+    PF --> P6["unpin → True"]
+
+    P1 --> Test["TestCommandRegistry.get_command_returns_correct_definition"]
+    P2 --> Test
+    P3 --> Test
+    P4 --> Test
+    P5 --> Test
+    P6 --> Test
+```
+
+---
+
 ## What We Test
 
 ### ✅ Test These
 
-| Category | Examples |
-|----------|----------|
-| **CLI Entry Points** | `cli_main()`, command-line argument parsing, menu navigation |
-| **Command Execution** | All 11 commands (check, ls, upgrade, rollback, rebase, remote-ls, pin, unpin, rm, undeploy, kargs) |
-| **Error Handling** | Missing dependencies (curl), command failures, timeouts, invalid arguments |
-| **Menu Workflows** | Main menu → submenu navigation, ESC key handling, deployment selection |
-| **Config System** | TOML loading, validation, default values, repository-specific rules |
-| **OCI Integration** | Tag fetching, pagination, filtering, sorting, token caching |
-| **Deployment Operations** | Parsing rpm-ostree output, pin/unpin state, menu item generation |
+| Category                  | Examples                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| **CLI Entry Points**      | `cli_main()`, command-line argument parsing, menu navigation                                       |
+| **Command Execution**     | All 11 commands (check, ls, upgrade, rollback, rebase, remote-ls, pin, unpin, rm, undeploy, kargs) |
+| **Error Handling**        | Missing dependencies (curl), command failures, timeouts, invalid arguments                         |
+| **Menu Workflows**        | Main menu → submenu navigation, ESC key handling, deployment selection                             |
+| **Config System**         | TOML loading, validation, default values, repository-specific rules                                |
+| **OCI Integration**       | Tag fetching, pagination, filtering, sorting, token caching                                        |
+| **Deployment Operations** | Parsing rpm-ostree output, pin/unpin state, menu item generation                                   |
+| **Rebase Workflows**      | Tag resolution, registry aliases, confirmation prompts, custom repos                               |
 
 ### Example Test Coverage
 
@@ -105,10 +265,10 @@ def test_rebase_command_with_url(mocker):
         mocker.MagicMock(returncode=0),  # curl check
         mocker.MagicMock(returncode=0),  # rebase command
     ]
-    
+
     sys.argv = ["urh", "rebase", "ghcr.io/test/repo:tag"]
     cli_main()
-    
+
     # Verify ostree prefix was added
     last_call = mock_run.call_args_list[-1][0][0]
     assert "ostree-image-signed:docker://ghcr.io/test/repo:tag" in last_call
@@ -117,11 +277,11 @@ def test_rebase_command_with_url(mocker):
 def test_kargs_conditional_sudo(mocker):
     """Kargs command: no args = no sudo, with args = sudo"""
     mock_run = mocker.patch("subprocess.run")
-    
+
     registry = CommandRegistry()
     registry._handle_kargs([])  # No args
     registry._handle_kargs(["--append", "quiet"])  # With args
-    
+
     calls = mock_run.call_args_list
     assert "sudo" not in calls[0][0][0]  # No sudo for no args
     assert "sudo" in calls[1][0][0]      # Sudo for modification args
@@ -133,15 +293,15 @@ def test_kargs_conditional_sudo(mocker):
 
 ### ❌ Don't Do These
 
-| Anti-Pattern | Why Avoid | Better Alternative |
-|--------------|-----------|-------------------|
-| **Unit tests for pure functions** | Tested indirectly through E2E/integration | Test `extract_repository_from_url()` through `remote-ls` command |
-| **Mocking the SUT** | Defeats the purpose of testing | Mock only external I/O (subprocess, network, files) |
-| **`with mocker.patch(...)` context managers** | Hard to scale, deep nesting | Direct `mocker.patch()` at function top |
-| **`unittest.mock` imports** | Inconsistent with pytest-mock | Use `mocker.MagicMock()`, `mocker.patch()` |
-| **`self.assertEqual()` style assertions** | Unnecessary verbosity | Use plain `assert` statements |
-| **Testing implementation details** | Brittle to refactoring | Test observable behavior only |
-| **Overlapping tests** | Wasted maintenance | Each test verifies one behavior |
+| Anti-Pattern                                  | Why Avoid                                 | Better Alternative                                               |
+| --------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------- |
+| **Unit tests for pure functions**             | Tested indirectly through E2E/integration | Test `extract_repository_from_url()` through `remote-ls` command |
+| **Mocking the SUT**                           | Defeats the purpose of testing            | Mock only external I/O (subprocess, network, files)              |
+| **`with mocker.patch(...)` context managers** | Hard to scale, deep nesting               | Direct `mocker.patch()` at function top                          |
+| **`unittest.mock` imports**                   | Inconsistent with pytest-mock             | Use `mocker.MagicMock()`, `mocker.patch()`                       |
+| **`self.assertEqual()` style assertions**     | Unnecessary verbosity                     | Use plain `assert` statements                                    |
+| **Testing implementation details**            | Brittle to refactoring                    | Test observable behavior only                                    |
+| **Overlapping tests**                         | Wasted maintenance                        | Each test verifies one behavior                                  |
 
 ### Anti-Pattern Examples
 
@@ -196,13 +356,13 @@ When fixtures need to reflect configuration or data defined in source code, **im
 
 ```python
 # ✅ CORRECT: Import constants from source code
-from src.urh.config import _ALL_REPOSITORIES
+from src.urh.config import _STANDARD_REPOSITORIES
 
 @pytest.fixture(scope="session")
 def sample_config_data():
     # Generate from source of truth - stays in sync automatically
     container_options = [
-        f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES
+        f"ghcr.io/{repo}:{tag}" for repo, tag in _STANDARD_REPOSITORIES
     ]
     return {
         "container_urls": {"default": "...", "options": container_options},
@@ -224,6 +384,7 @@ def sample_config_data():
 ```
 
 **Benefits:**
+
 - Adding a new endpoint in source code automatically updates all tests
 - No risk of test data drifting from production behavior
 - Single source of truth principle applied to test fixtures
@@ -331,22 +492,22 @@ def test_sudo_requirements(command_sudo_params):
 
 ### What to Mock
 
-| Target | How to Mock | Example |
-|--------|-------------|---------|
-| **subprocess.run** | `mocker.patch("subprocess.run")` | Command execution, curl calls |
-| **Network/HTTP** | `mocker.patch("subprocess.run")` for curl | OCI registry calls |
-| **File I/O** | `mocker.patch("pathlib.Path.read_text")` | Config loading |
-| **System functions** | `mocker.patch("os.isatty")` | TTY detection |
-| **External dependencies** | `mocker.patch("src.urh.module.func")` | check_curl_presence |
+| Target                    | How to Mock                               | Example                       |
+| ------------------------- | ----------------------------------------- | ----------------------------- |
+| **subprocess.run**        | `mocker.patch("subprocess.run")`          | Command execution, curl calls |
+| **Network/HTTP**          | `mocker.patch("subprocess.run")` for curl | OCI registry calls            |
+| **File I/O**              | `mocker.patch("pathlib.Path.read_text")`  | Config loading                |
+| **System functions**      | `mocker.patch("os.isatty")`               | TTY detection                 |
+| **External dependencies** | `mocker.patch("src.urh.module.func")`     | check_curl_presence           |
 
 ### What NOT to Mock
 
-| Target | Why Not | Alternative |
-|--------|---------|-------------|
-| **Command handlers** | This is the SUT | Test through `cli_main()` |
-| **Business logic** | Defeats testing purpose | Test through public API |
-| **Pure functions** | Tested indirectly | Test through integration |
-| **Data classes** | No behavior to mock | Use real instances |
+| Target               | Why Not                 | Alternative               |
+| -------------------- | ----------------------- | ------------------------- |
+| **Command handlers** | This is the SUT         | Test through `cli_main()` |
+| **Business logic**   | Defeats testing purpose | Test through public API   |
+| **Pure functions**   | Tested indirectly       | Test through integration  |
+| **Data classes**     | No behavior to mock     | Use real instances        |
 
 ### Mocking Patterns
 
@@ -482,31 +643,27 @@ class TestCommandHandlers:
 
 ### Fixture Cheat Sheet
 
-| Fixture | Scope | Use For |
-|---------|-------|---------|
-| `sample_config_data` | session | Precomputed config dictionary |
-| `sample_tags_data` | session | Precomputed OCI tags response |
-| `sample_status_output` | session | Pre-parsed rpm-ostree status output |
-| `sample_deployments` | session | Pre-parsed DeploymentInfo list |
-| `command_registry` | session | Initialized CommandRegistry |
-| `mock_config_for_module_tests` | module | Mock URHConfig for module tests |
-| `oci_client_with_mocks` | module | OCIClient with mocked token/HTTP |
-| `menu_system_with_mocks` | module | MenuSystem in non-TTY mode |
-| `mock_subprocess_run` | function | Configure subprocess return values |
-| `mock_curl_response` | function | Simulate OCI registry responses |
-| `mock_get_config` | function | Mock get_config() function |
-| `mock_menu_show` | function | Predefine menu selections |
-| `mock_deployment_info` | function | Mock deployment info functions |
-| `mock_sys_exit` | function | Mock sys.exit() |
-| `mock_print` | function | Capture print output |
-| `temp_config_file` | function | Create temporary TOML config file |
-| `mock_token_provider` | function | Inject mock token manager |
-| `mock_http_client` | function | Inject mock HTTP client |
-| `mock_menu_provider` | function | Inject mock menu system |
-| `mock_file_reader` | function | Inject mock file reader |
-| `repository_url_params` | function | Parametrized URL extraction tests |
-| `context_url_params` | function | Parametrized context extraction tests |
-| `command_sudo_params` | function | Parametrized sudo requirement tests |
+| Fixture                        | Scope    | Use For                                |
+| ------------------------------ | -------- | -------------------------------------- |
+| `sample_config_data`           | session  | Precomputed config dictionary          |
+| `sample_tags_data`             | session  | Precomputed OCI tags response          |
+| `sample_status_output`         | session  | Pre-parsed rpm-ostree status output    |
+| `sample_deployments`           | session  | Pre-parsed DeploymentInfo list         |
+| `command_registry`             | session  | Initialized CommandRegistry            |
+| `mock_config_for_module_tests` | module   | Mock URHConfig for module tests        |
+| `oci_client_with_mocks`        | module   | OCIClient with mocked token/HTTP       |
+| `menu_system_with_mocks`       | module   | MenuSystem in non-TTY mode             |
+| `cli_command`                  | function | Set/restore sys.argv                   |
+| `mock_rpm_ostree_commands`     | function | Mock rpm-ostree, ostree, curl commands |
+| `command_sudo_params`          | function | Parametrized sudo requirement tests    |
+
+### Shared Utility Functions
+
+| Function                       | Purpose                                                          | Used By                           |
+| ------------------------------ | ---------------------------------------------------------------- | --------------------------------- |
+| `apply_e2e_test_environment()` | Consolidated E2E setup (subprocess, TTY, curl, deployment mocks) | All E2E test classes              |
+| `mock_execvp_command()`        | Mock os.execvp, run cli_main(), return captured command          | Rebase workflows, CLI workflows   |
+| `_make_mock_process()`         | Create mock subprocess.Popen process object                      | Rebase workflows, menu navigation |
 
 ### Common Patterns
 
@@ -529,27 +686,38 @@ mock_exit.assert_called_once_with(0)
 # Test printed output
 mock_print = mocker.patch("builtins.print")
 mock_print.assert_called_with("expected message")
+
+# E2E test with apply_e2e_test_environment
+@pytest.fixture(autouse=True)
+def setup(self, mocker):
+    apply_e2e_test_environment(mocker, tty=False)
+
+# E2E test with execvp command capture
+cli_command(["urh", "rebase", "tag"])
+cmd = mock_execvp_command(mocker, ["sudo", "rpm-ostree", "rebase", "tag"])
+assert "rpm-ostree" in cmd
 ```
 
 ---
 
 ## Current Test Suite Summary
 
-**As of February 2026**
+**As of April 2026**
 
-| File | Tests | Description |
-|------|-------|-------------|
-| `e2e/test_cli_workflows.py` | 16 | CLI entry point, command execution, error handling |
-| `e2e/test_menu_navigation.py` | 17 | Menu system, ESC handling, deployment selection |
-| `e2e/test_remote_operations.py` | 9 | OCI client workflows, pagination, tag filtering |
-| `integration/test_command_handlers.py` | 24 | Command registry, handlers, sudo logic, submenu flows |
-| `integration/test_config_system.py` | 39 | Config loading, validation, serialization, defaults |
-| `integration/test_deployment_ops.py` | 21 | Deployment parsing, filtering, menu item generation |
-| `integration/test_menu_system.py` | 18 | Menu system logic, TTY/non-TTY modes, input parsing |
-| `integration/test_oci_client.py` | 27 | HTTP parsing, pagination, auth, JSON handling |
-| **Total** | **171** | **42 E2E + 129 Integration** |
+| File                                   | Tests   | Description                                                              |
+| -------------------------------------- | ------- | ------------------------------------------------------------------------ |
+| `e2e/test_cli_workflows.py`            | 18      | CLI entry point, command execution, error handling, arg parsing          |
+| `e2e/test_menu_navigation.py`          | 18      | Menu system, ESC handling, deployment selection, header display          |
+| `e2e/test_remote_operations.py`        | 9       | OCI client workflows, pagination, tag filtering                          |
+| `e2e/test_rebase_workflows.py`         | 25      | Tag resolution, repo suffix syntax, confirmation prompts, custom repos   |
+| `integration/test_command_handlers.py` | 44      | Command registry, handlers, kargs subcommands, sudo logic, submenu flows |
+| `integration/test_config_system.py`    | 33      | Config loading, validation, serialization, defaults, TOML parsing        |
+| `integration/test_deployment_ops.py`   | 21      | Deployment parsing, filtering, menu item generation                      |
+| `integration/test_menu_system.py`      | 18      | Menu system logic, TTY/non-TTY modes, input parsing, ESC handling        |
+| `integration/test_oci_client.py`       | 22      | HTTP parsing, pagination, auth, JSON handling, tag filtering             |
+| **Total**                              | **208** | **59 E2E + 149 Integration**                                             |
 
-**Coverage:** 74% overall
+**Coverage:** 84% overall
 **Quality:** All checks pass (ruff, pyright, prettier)
 **Complexity:** Average A (2.96)
 

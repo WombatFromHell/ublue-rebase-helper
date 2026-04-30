@@ -21,6 +21,7 @@ from src.urh.menu import MenuExitException, MenuSystem
 from src.urh.models import GumCommand, MenuItem
 
 
+@pytest.mark.integration
 class TestGumCommand:
     """Test GumCommand builder."""
 
@@ -85,6 +86,7 @@ class TestGumCommand:
         assert header_value == "Main Header"
 
 
+@pytest.mark.integration
 class TestMenuSystemNonTTY:
     """Test MenuSystem in non-TTY mode."""
 
@@ -117,6 +119,7 @@ class TestMenuSystemNonTTY:
         mock_print.assert_any_call("Persistent")
 
 
+@pytest.mark.integration
 class TestMenuSystemTextMenu:
     """Test MenuSystem text menu fallback."""
 
@@ -210,6 +213,7 @@ class TestMenuSystemTextMenu:
         assert result is None
 
 
+@pytest.mark.integration
 class TestMenuSystemGumMenu:
     """Test MenuSystem gum menu with mocked subprocess."""
 
@@ -303,6 +307,7 @@ class TestMenuSystemGumMenu:
         mock_print.assert_any_call("Menu selection timed out.")
 
 
+@pytest.mark.integration
 class TestMenuSystemESCHandling:
     """Test ESC key handling in menus."""
 

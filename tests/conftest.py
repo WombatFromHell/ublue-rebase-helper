@@ -7,10 +7,9 @@ This module provides session, module, and function-scoped fixtures for:
 - Dependency injection helpers for testable source code
 """
 
-import json
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 import pytest
 from pytest_mock import MockerFixture
@@ -20,13 +19,59 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.urh.commands import CommandRegistry  # noqa: E402
+from src.urh.commands.registry import CommandRegistry  # noqa: E402
 from src.urh.config import (  # noqa: E402
-    _ALL_REPOSITORIES,
+    _STANDARD_REPOSITORIES,
     ContainerURLsConfig,
     URHConfig,
 )
 from src.urh.deployment import DeploymentInfo  # noqa: E402
+
+# =============================================================================
+# SHARED TEST UTILITIES
+# =============================================================================
+
+
+def _make_mock_process(mocker: MockerFixture, returncode: int = 0) -> Any:
+    """Create a properly configured mock subprocess.Popen process object.
+
+    Usage:
+        mock_popen = mocker.patch("subprocess.Popen")
+        mock_popen.return_value = _make_mock_process(mocker, returncode=0)
+    """
+    proc = mocker.MagicMock()
+    proc.returncode = returncode
+    proc.communicate.return_value = (None, None)
+    return proc
+
+
+@pytest.fixture
+def cli_command() -> Generator[Callable[[List[str]], List[str]], None, None]:
+    """Fixture that sets sys.argv and restores it after the test.
+
+    Replaces the manual try/finally pattern:
+        original_argv = sys.argv
+        sys.argv = ["urh", "command", "arg"]
+        try:
+            # test code
+        finally:
+            sys.argv = original_argv
+
+    Usage:
+        def test_something(cli_command):
+            cli_command(["urh", "rebase", "testing"])
+            # test code
+    """
+    original_argv = sys.argv
+
+    def _factory(argv: List[str]) -> List[str]:
+        sys.argv = argv
+        return argv
+
+    yield _factory
+
+    sys.argv = original_argv
+
 
 # =============================================================================
 # SESSION-SCOPED FIXTURES (expensive, reusable across all tests)
@@ -41,11 +86,13 @@ def sample_config_data() -> Dict[str, Any]:
     Use this fixture when you need consistent config data across tests.
     Avoid modifying the returned data to maintain test isolation.
 
-    Container URLs are generated from _ALL_REPOSITORIES to stay in sync
+    Container URLs are generated from _STANDARD_REPOSITORIES to stay in sync
     with the single source of truth in config.py.
     """
     # Generate container URLs from central source of truth
-    container_options = [f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES]
+    container_options = [
+        f"ghcr.io/{repo}:{tag}" for repo, tag in _STANDARD_REPOSITORIES
+    ]
 
     return {
         "repository": [
@@ -231,424 +278,209 @@ def menu_system_with_mocks(mocker: MockerFixture) -> Any:
 
 
 @pytest.fixture
-def mock_subprocess_run(mocker: MockerFixture) -> Any:
+def mock_rpm_ostree_commands(mocker: MockerFixture) -> None:
     """
-    Mock subprocess.run with configurable return value.
+    Mock rpm-ostree, ostree, and curl commands to prevent FileNotFoundError.
 
-    Usage:
-        def test_something(mock_subprocess_run):
-            mock_subprocess_run(returncode=0, stdout="output")
-    """
-
-    def _factory(returncode: int = 0, stdout: str = "", stderr: str = "") -> Any:
-        mock_result = mocker.MagicMock()
-        mock_result.returncode = returncode
-        mock_result.stdout = stdout
-        mock_result.stderr = stderr
-        return mocker.patch("subprocess.run", return_value=mock_result)
-
-    return _factory
-
-
-@pytest.fixture
-def mock_rpm_ostree_commands(mocker: MockerFixture) -> Any:
-    """
-    Mock rpm-ostree, ostree, and curl commands to prevent FileNotFoundError in tests.
-
-    This fixture mocks subprocess.run to handle any rpm-ostree, ostree, and curl
-    commands with sensible default responses, preventing tests from failing when
-    these commands don't exist on the test runner.
+    Patches subprocess.run to handle common system commands with sensible
+    defaults. Unmocked commands fail with a clear error message.
 
     Usage:
         def test_with_rpm_ostree(mock_rpm_ostree_commands):
             # rpm-ostree, ostree, and curl commands now return mock results
-            # Can be configured with custom responses via the factory
-
-    Returns:
-        Factory function that accepts configuration parameters:
-        - status_output: str for rpm-ostree status -v
-        - kargs_output: str for rpm-ostree kargs
-        - curl_path: str for curl path check (default: "/usr/bin/curl")
-        - returncode: int exit code (default 0)
     """
 
-    def _factory(
-        status_output: str = "",
-        kargs_output: str = "",
-        curl_path: str = "/usr/bin/curl",
-        returncode: int = 0,
-    ) -> Any:
-        def mock_subprocess_handler(cmd: list, **kwargs: Any) -> Any:
-            mock_result = mocker.MagicMock()
-            mock_result.returncode = returncode
-
-            # Handle curl check commands (which curl, type curl, etc.)
-            if "curl" in cmd:
-                # Check if it's a "which curl" or similar path check
-                if cmd[0] in ("which", "type", "command"):
-                    mock_result.stdout = curl_path
-                    mock_result.returncode = 0
-                else:
-                    # Actual curl command - return empty response by default
-                    mock_result.stdout = ""
-                    mock_result.returncode = 0
-            # Handle rpm-ostree status -v
-            elif "rpm-ostree" in cmd and "status" in cmd:
-                mock_result.stdout = (
-                    status_output
-                    or """State: idle
-Deployments:
-● ostree-image-signed:docker://ghcr.io/test/repo:testing
-                   Version: 1.0.0
-                    Commit: abc123
-"""
-                )
-            # Handle rpm-ostree kargs (read-only)
-            elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
-                mock_result.stdout = kargs_output or "quiet loglevel=3"
-            # Handle ostree admin pin commands
-            elif "ostree" in cmd and "admin" in cmd and "pin" in cmd:
-                mock_result.stdout = ""
-            # Handle ostree admin undeploy
-            elif "ostree" in cmd and "admin" in cmd and "undeploy" in cmd:
-                mock_result.stdout = ""
-            # Default for other rpm-ostree/ostree commands
-            elif "rpm-ostree" in cmd or "ostree" in cmd:
-                mock_result.stdout = ""
-            else:
-                # For other commands, let them fail
-                # so tests catch unmocked calls
-                mock_result.returncode = 1
-                mock_result.stderr = f"Unmocked command: {' '.join(cmd)}"
-
-            return mock_result
-
-        return mocker.patch("subprocess.run", side_effect=mock_subprocess_handler)
-
-    return _factory
-
-
-@pytest.fixture
-def mock_curl_response(mocker: MockerFixture) -> Any:
-    """
-    Mock curl response for OCI registry calls.
-
-    Usage:
-        def test_fetch_tags(mock_curl_response):
-            mock_curl_response(tags=["v1.0", "v2.0"])
-    """
-
-    def _factory(
-        tags: Optional[List[str]] = None,
-        link_header: Optional[str] = None,
-        status_code: int = 200,
-    ) -> Any:
-        tags = tags or []
+    def mock_subprocess_handler(cmd: list, **kwargs: Any) -> Any:
         mock_result = mocker.MagicMock()
         mock_result.returncode = 0
 
-        # Build response with optional headers
-        response_body = json.dumps({"tags": tags})
-        if link_header:
-            mock_result.stdout = (
-                f"HTTP/2 {status_code}\r\nLink: {link_header}\r\n\r\n{response_body}"
-            )
-        else:
-            mock_result.stdout = response_body
-
-        return mocker.patch("subprocess.run", return_value=mock_result)
-
-    return _factory
-
-
-@pytest.fixture
-def mock_get_config(mocker: MockerFixture) -> Any:
-    """
-    Mock get_config to return a test configuration.
-
-    Usage:
-        def test_command(mock_get_config):
-            config = mock_get_config(options=["ghcr.io/test/repo:tag"])
-    """
-
-    def _factory(
-        options: Optional[List[str]] = None,
-        default: str = "ghcr.io/test/repo:testing",
-    ) -> URHConfig:
-        config = URHConfig()
-        config.container_urls = ContainerURLsConfig(
-            default=default,
-            options=options or ["ghcr.io/test/repo:testing"],
-        )
-        return mocker.patch("src.urh.config.get_config", return_value=config)
-
-    return _factory
-
-
-@pytest.fixture
-def mock_menu_show(mocker: MockerFixture) -> Any:
-    """
-    Mock MenuSystem.show_menu to return a predefined selection.
-
-    Usage:
-        def test_submenu(mock_menu_show):
-            mock_menu_show(return_value="ghcr.io/test/repo:stable")
-    """
-
-    def _factory(return_value: Any = "test_selection") -> Any:
-        return mocker.patch(
-            "src.urh.menu.MenuSystem.show_menu", return_value=return_value
-        )
-
-    return _factory
-
-
-@pytest.fixture
-def mock_deployment_info(mocker: MockerFixture) -> Any:
-    """
-    Mock deployment info functions.
-
-    Usage:
-        def test_pin_command(mock_deployment_info):
-            mock_deployment_info(
-                current={"repository": "test", "version": "1.0"},
-                deployments=[DeploymentInfo(...)]
-            )
-    """
-
-    def _factory(
-        current: Optional[Dict[str, str]] = None,
-        deployments: Optional[List[DeploymentInfo]] = None,
-    ) -> Dict[str, Any]:
-        current = current or {"repository": "test-repo", "version": "1.0.0"}
-        deployments = deployments or []
-
-        mocks = {
-            "get_current": mocker.patch(
-                "src.urh.deployment.get_current_deployment_info", return_value=current
-            ),
-            "get_deployments": mocker.patch(
-                "src.urh.deployment.get_deployment_info", return_value=deployments
-            ),
-            "format_header": mocker.patch(
-                "src.urh.deployment.format_deployment_header",
-                return_value=f"Current deployment: {current['repository']} ({current['version']})",
-            ),
-        }
-        return mocks
-
-    return _factory
-
-
-@pytest.fixture
-def mock_sys_exit(mocker: MockerFixture) -> Any:
-    """
-    Mock sys.exit to prevent actual exit during tests.
-
-    Usage:
-        def test_exits_on_error(mock_sys_exit):
-            # Test code that calls sys.exit()
-            mock_sys_exit.assert_called_once_with(1)
-    """
-    return mocker.patch("sys.exit")
-
-
-@pytest.fixture
-def mock_print(mocker: MockerFixture) -> Any:
-    """
-    Mock print to capture output during tests.
-
-    Usage:
-        def test_prints_message(mock_print):
-            # Test code that calls print()
-            mock_print.assert_called_once_with("expected message")
-    """
-    return mocker.patch("builtins.print")
-
-
-@pytest.fixture
-def temp_config_file(
-    mocker: MockerFixture, tmp_path: Path
-) -> Callable[[Optional[str]], Path]:
-    """
-    Create a temporary config file for testing.
-
-    Usage:
-        def test_load_config(temp_config_file):
-            config_path = temp_config_file(content="[settings]\nmax_tags_display = 50")
-    """
-
-    def _factory(content: Optional[str] = None) -> Path:
-        content = (
-            content
-            or """
-[container_urls]
-default = "ghcr.io/test/repo:testing"
-options = ["ghcr.io/test/repo:testing"]
-
-[settings]
-max_tags_display = 30
-debug_mode = false
+        if "curl" in cmd:
+            if cmd[0] in ("which", "type", "command"):
+                mock_result.stdout = "/usr/bin/curl"
+            else:
+                mock_result.stdout = ""
+        elif "rpm-ostree" in cmd and "status" in cmd:
+            mock_result.stdout = """State: idle
+Deployments:
+● ostree-image-signed:docker://ghcr.io/test/repo:testing
+               Version: 1.0.0
+                Commit: abc123
 """
+        elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
+            mock_result.stdout = "quiet loglevel=3"
+        elif "ostree" in cmd and "admin" in cmd and "pin" in cmd:
+            mock_result.stdout = ""
+        elif "ostree" in cmd and "admin" in cmd and "undeploy" in cmd:
+            mock_result.stdout = ""
+        elif "rpm-ostree" in cmd or "ostree" in cmd:
+            mock_result.stdout = ""
+        else:
+            mock_result.returncode = 1
+            mock_result.stderr = f"Unmocked command: {' '.join(cmd)}"
+
+        return mock_result
+
+    mocker.patch("subprocess.run", side_effect=mock_subprocess_handler)
+
+
+class ExecCompleted(Exception):
+    """Raised when os.execvp is mocked in tests to simulate process replacement."""
+
+    def __init__(self, cmd: list[str]):
+        self.cmd = cmd
+        super().__init__(f"execvp: {cmd[0]}")
+
+
+def apply_e2e_test_environment(
+    mocker: MockerFixture,
+    tty: bool = False,
+    deployment_info: Optional[Dict[str, str]] = None,
+    deployment_header: Optional[str] = None,
+    mock_execvp: bool = False,
+    mock_sys_exit: bool = False,
+    execvp_cmd: Optional[List[str]] = None,
+) -> None:
+    """
+    Apply common E2E test environment setup.
+
+    This function consolidates the near-identical setup code that appears
+    in every E2E test class's autouse fixture. Call it from your fixture
+    with the parameters that match your test class's needs.
+
+    Parameters
+    ----------
+    mocker : MockerFixture
+        pytest-mock fixture instance.
+    tty : bool, default False
+        If True, mock os.isatty to return True (menu mode).
+        If False, mock os.isatty to return False (direct CLI mode).
+    deployment_info : dict, optional
+        Return value for get_current_deployment_info. Defaults to
+        {"repository": "test-repo", "version": "1.0.0"}.
+    deployment_header : str, optional
+        Return value for format_deployment_header. Auto-generated from
+        deployment_info if not provided.
+    mock_execvp : bool, default False
+        If True, patch os.execvp to raise ExecCompleted(execvp_cmd).
+        Tests that need custom execvp behavior should set this to False
+        and patch os.execvp themselves.
+    mock_sys_exit : bool, default False
+        If True, patch sys.exit to prevent actual exits.
+    execvp_cmd : list[str], optional
+        Command to use in ExecCompleted exception. Defaults to
+        ["sudo", "rpm-ostree", "upgrade"] if mock_execvp is True.
+    """
+
+    def _mock_subprocess(cmd: list, **kwargs: Any) -> Any:
+        result = mocker.MagicMock()
+        result.returncode = 0
+        if "curl" in cmd:
+            result.stdout = (
+                "/usr/bin/curl" if cmd[0] in ("which", "type", "command") else ""
+            )
+        elif "rpm-ostree" in cmd and "status" in cmd:
+            result.stdout = """State: idle
+Deployments:
+● ostree-image-signed:docker://ghcr.io/test/repo:testing
+               Version: 1.0.0
+                Commit: abc123
+"""
+        elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
+            result.stdout = "quiet loglevel=3"
+        elif "ostree" in cmd and "admin" in cmd and "pin" in cmd:
+            result.stdout = ""
+        elif "ostree" in cmd and "admin" in cmd and "undeploy" in cmd:
+            result.stdout = ""
+        elif "rpm-ostree" in cmd or "ostree" in cmd:
+            result.stdout = ""
+        else:
+            result.returncode = 1
+            result.stderr = f"Unmocked command: {' '.join(cmd)}"
+        return result
+
+    mocker.patch("subprocess.run", side_effect=_mock_subprocess)
+
+    # Mock TTY mode
+    mocker.patch("os.isatty", return_value=tty)
+
+    # Mock curl check to always succeed
+    mocker.patch("src.urh.system.check_curl_presence", return_value=True)
+
+    # Mock deployment info
+    if deployment_info is None:
+        deployment_info = {"repository": "test-repo", "version": "1.0.0"}
+    if deployment_header is None:
+        deployment_header = (
+            f"Current deployment: {deployment_info['repository']} "
+            f"({deployment_info['version']})"
         )
-        config_path = tmp_path / "urh.toml"
-        config_path.write_text(content)
-        return config_path
+    mocker.patch(
+        "src.urh.deployment.get_current_deployment_info",
+        return_value=deployment_info,
+    )
+    mocker.patch(
+        "src.urh.deployment.format_deployment_header",
+        return_value=deployment_header,
+    )
 
-    return _factory
+    # Optionally mock os.execvp
+    if mock_execvp:
+        cmd = execvp_cmd or ["sudo", "rpm-ostree", "upgrade"]
+        mocker.patch("os.execvp", side_effect=ExecCompleted(cmd))
 
-
-# =============================================================================
-# DEPENDENCY INJECTION HELPERS (Protocol classes and factories)
-# =============================================================================
-
-
-# Protocol definitions for type hints (Python 3.11+ uses typing.Protocol)
-try:
-    from typing import Protocol
-except ImportError:
-    from typing_extensions import Protocol
-
-
-class TokenProvider(Protocol):
-    """Protocol for injectable token providers."""
-
-    def get_token(self) -> Optional[str]: ...
-
-    def invalidate_cache(self) -> None: ...
+    # Optionally mock sys.exit
+    if mock_sys_exit:
+        mocker.patch("sys.exit")
 
 
-class HTTPClient(Protocol):
-    """Protocol for injectable HTTP clients."""
-
-    def get(self, url: str, headers: Dict[str, str]) -> Any: ...
-
-
-class MenuProvider(Protocol):
-    """Protocol for injectable menu providers."""
-
-    def show_menu(
-        self,
-        items: Any,
-        header: str,
-        persistent_header: Optional[str] = None,
-        is_main_menu: bool = False,
-    ) -> Optional[Any]: ...
-
-
-class FileReader(Protocol):
-    """Protocol for injectable file readers."""
-
-    def read_toml(self, path: Path) -> Dict[str, Any]: ...
-
-    def write_toml(self, path: Path, data: Dict[str, Any]) -> None: ...
-
-
-@pytest.fixture
-def mock_token_provider(mocker: MockerFixture) -> TokenProvider:
+def mock_execvp_command(
+    mocker: MockerFixture,
+    expected_cmd: List[str],
+) -> List[str]:
     """
-    Create a mock TokenProvider for dependency injection.
+    Mock os.execvp, run cli_main(), and return the captured command.
 
-    Usage:
-        def test_with_injected_token(mock_token_provider):
-            mock_token_provider.get_token.return_value = "injected_token"
-            client = OCIClient("test/repo", token_manager=mock_token_provider)
+    This helper consolidates the common pattern:
+
+        mock_execvp = mocker.patch("os.execvp", side_effect=ExecCompleted(cmd))
+        with pytest.raises(ExecCompleted):
+            cli_main()
+        assert mock_execvp.call_count >= 1
+        last_call = mock_execvp.call_args_list[-1][0][1]
+
+    Parameters
+    ----------
+    mocker : MockerFixture
+        pytest-mock fixture instance.
+    expected_cmd : list[str]
+        The command list to raise in ExecCompleted.
+
+    Returns
+    -------
+    list[str]
+        The command list actually passed to os.execvp (last call).
+
+    Example
+    -------
+        def test_rebase_executes_command(mocker, cli_command):
+            cli_command(["urh", "rebase", "tag"])
+            cmd = mock_execvp_command(mocker, ["sudo", "rpm-ostree", "rebase", "tag"])
+            assert "rpm-ostree" in cmd
     """
-    mock = mocker.MagicMock()
-    mock.get_token.return_value = "injected_test_token"
-    mock.invalidate_cache = mocker.MagicMock()
-    return mock
+    mock_execvp = mocker.patch("os.execvp", side_effect=ExecCompleted(expected_cmd))
 
+    with pytest.raises(ExecCompleted):
+        from src.urh.cli import main as cli_main
 
-@pytest.fixture
-def mock_http_client(mocker: MockerFixture) -> HTTPClient:
-    """
-    Create a mock HTTPClient for dependency injection.
+        cli_main()
 
-    Usage:
-        def test_with_injected_http(mock_http_client):
-            mock_http_client.get.return_value = {"tags": [...]}
-            # Use with refactored OCIClient that accepts http_client
-    """
-    mock = mocker.MagicMock()
-    mock.get.return_value = {"tags": ["tag1", "tag2"]}
-    return mock
-
-
-@pytest.fixture
-def mock_menu_provider(mocker: MockerFixture) -> MenuProvider:
-    """
-    Create a mock MenuProvider for dependency injection.
-
-    Usage:
-        def test_with_injected_menu(mock_menu_provider):
-            mock_menu_provider.show_menu.return_value = "selected"
-            registry = CommandRegistry(menu_system=mock_menu_provider)
-    """
-    mock = mocker.MagicMock()
-    mock.show_menu.return_value = "injected_selection"
-    return mock
-
-
-@pytest.fixture
-def mock_file_reader(mocker: MockerFixture) -> FileReader:
-    """
-    Create a mock FileReader for dependency injection.
-
-    Usage:
-        def test_with_injected_file_reader(mock_file_reader):
-            mock_file_reader.read_toml.return_value = {...}
-            manager = ConfigManager(file_reader=mock_file_reader)
-    """
-    mock = mocker.MagicMock()
-
-    def _read_toml(path: Path) -> Dict[str, Any]:
-        # For testing, just return predefined data
-        return {
-            "container_urls": {
-                "default": "ghcr.io/test/repo:testing",
-                "options": ["ghcr.io/test/repo:testing"],
-            },
-            "settings": {"max_tags_display": 30, "debug_mode": False},
-        }
-
-    mock.read_toml.side_effect = _read_toml
-    mock.write_toml = mocker.MagicMock()
-    return mock
+    assert mock_execvp.call_count >= 1
+    return mock_execvp.call_args_list[-1][0][1]
 
 
 # =============================================================================
 # PARAMETRIZED TEST DATA FIXTURES
 # =============================================================================
-
-
-@pytest.fixture(
-    params=[
-        ("ghcr.io/user/repo:tag", "user/repo"),
-        ("docker.io/user/repo:tag", "user/repo"),
-        ("quay.io/user/repo:tag", "user/repo"),
-        ("user/repo:tag", "user/repo"),
-        ("ghcr.io/user/repo", "user/repo"),
-    ]
-)
-def repository_url_params(request: Any) -> tuple:
-    """Parametrized fixture for repository URL extraction tests."""
-    return request.param
-
-
-@pytest.fixture(
-    params=[
-        ("ghcr.io/user/repo:testing", "testing"),
-        ("ghcr.io/user/repo:stable", "stable"),
-        ("ghcr.io/user/repo:unstable", "unstable"),
-        ("ghcr.io/user/repo:latest", "latest"),
-        ("ghcr.io/user/repo:v1.0.0", None),
-        ("ghcr.io/user/repo", None),
-    ]
-)
-def context_url_params(request: Any) -> tuple:
-    """Parametrized fixture for context URL extraction tests."""
-    return request.param
 
 
 @pytest.fixture(

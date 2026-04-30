@@ -28,9 +28,6 @@ _STANDARD_REPOSITORIES: tuple[tuple[str, str], ...] = (
     ("ublue-os/bazzite-nvidia-open", "stable"),
 )
 
-# All repositories combined for container URL generation
-_ALL_REPOSITORIES: tuple[tuple[str, str], ...] = (*_STANDARD_REPOSITORIES,)
-
 
 @dataclass(slots=True, kw_only=True)
 class RepositoryConfig:
@@ -83,7 +80,7 @@ class ContainerURLsConfig:
     default: str = "ghcr.io/wombatfromhell/bazzite-nix:testing"
     options: List[str] = field(
         default_factory=lambda: [
-            f"ghcr.io/{repo}:{tag}" for repo, tag in _ALL_REPOSITORIES
+            f"ghcr.io/{repo}:{tag}" for repo, tag in _STANDARD_REPOSITORIES
         ]
     )
 

@@ -3,68 +3,56 @@ System utilities for ublue-rebase-helper.
 """
 
 import logging
+import os
 import subprocess
-from typing import List, Optional
+from typing import List
+
+from .constants import OSTREE_IMAGE_PREFIX, REGISTRY_PREFIXES
+
+logger = logging.getLogger(__name__)
+
+_cache_is_root: bool | None = None
 
 
-def run_command(cmd: List[str], timeout: Optional[int] = None) -> int:
-    """Run a command and return its exit code."""
-    try:
-        if timeout is None:
-            result = subprocess.run(
-                cmd, check=False
-            )  # Original behavior for backward compatibility
-        else:
-            result = subprocess.run(
-                cmd, check=False, timeout=timeout
-            )  # With timeout if specified
-        return result.returncode
-    except FileNotFoundError:
-        logger.error(f"Command not found: {' '.join(cmd)}")
-        print(f"Command not found: {' '.join(cmd)}")  # Also print for user visibility
-        return 1
-    except subprocess.TimeoutExpired:
-        logger.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
-        print(
-            f"Command timed out after {timeout}s: {' '.join(cmd)}"
-        )  # Also print for user visibility
-        return 124  # Standard timeout exit code
-    except Exception as e:
-        logger.error(f"Error running command: {e}")
-        print(f"Error running command: {e}")  # Also print for user visibility
-        return 1  # Return error code for any other type of exception
+def is_running_as_root() -> bool:
+    """Check if the current process is running as root.
 
-
-def run_command_safe(base_cmd: str, *args: str, timeout: Optional[int] = 300) -> int:
-    """Run a command with type-level injection prevention.
-
-    The base_cmd must be a literal string, preventing variable injection.
+    Result is cached after the first call since the effective UID does not change
+    during the lifetime of the process.
     """
-    cmd = [base_cmd, *args]
+    global _cache_is_root
+    if _cache_is_root is None:
+        _cache_is_root = os.geteuid() == 0
+    return _cache_is_root
+
+
+def build_command(requires_sudo: bool, base_cmd: List[str]) -> List[str]:
+    """Build a command list, prepending sudo only if elevation is required.
+
+    Args:
+        requires_sudo: Whether the command needs root privileges.
+        base_cmd: The command to run (without sudo).
+
+    Returns:
+        Command list with sudo prepended if needed.
+    """
+    if requires_sudo and not is_running_as_root():
+        return ["sudo", *base_cmd]
+    return base_cmd[:]
+
+
+def _run_command(cmd: List[str]) -> int:
+    """Run a command by replacing the current process.
+
+    The process is replaced via os.execvp, so sudo gets the foreground TTY
+    naturally and Ctrl+C works as expected.
+    """
     try:
-        if timeout is None:
-            result = subprocess.run(
-                cmd, check=False
-            )  # Original behavior for backward compatibility
-        else:
-            result = subprocess.run(
-                cmd, check=False, timeout=timeout
-            )  # With timeout if specified
-        return result.returncode
+        os.execvp(cmd[0], cmd)
     except FileNotFoundError:
-        logger.error(f"Command not found: {' '.join(cmd)}")
-        print(f"Command not found: {' '.join(cmd)}")  # Also print for user visibility
+        logger.error("Command not found: %s", " ".join(cmd))
+        print(f"Command not found: {' '.join(cmd)}")
         return 1
-    except subprocess.TimeoutExpired:
-        logger.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
-        print(
-            f"Command timed out after {timeout}s: {' '.join(cmd)}"
-        )  # Also print for user visibility
-        return 124  # Standard timeout exit code
-    except Exception as e:
-        logger.error(f"Error running command: {e}")
-        print(f"Error running command: {e}")  # Also print for user visibility
-        return 1  # Return error code for any other type of exception
 
 
 def check_curl_presence() -> bool:
@@ -80,7 +68,7 @@ def check_curl_presence() -> bool:
 
 def extract_repository_from_url(url: str) -> str:
     """Extract the repository name from a container URL."""
-    if url.startswith(("ghcr.io/", "docker.io/", "quay.io/", "gcr.io/")):
+    if url.startswith(REGISTRY_PREFIXES):
         registry_removed = url.split("/", 1)[1]
         repo_part = registry_removed.split(":")[0]
     else:
@@ -88,11 +76,10 @@ def extract_repository_from_url(url: str) -> str:
     return repo_part
 
 
-def extract_context_from_url(url: str) -> Optional[str]:
+def extract_context_from_url(url: str) -> str | None:
     """Extract the tag context from a URL."""
     if ":" in url:
         url_tag = url.split(":")[-1]
-        # Import the TagContext enum from the deployment module
         from .deployment import TagContext
 
         if url_tag in TagContext:
@@ -102,17 +89,11 @@ def extract_context_from_url(url: str) -> Optional[str]:
 
 def ensure_ostree_prefix(url: str) -> str:
     """Ensure the URL has the ostree-image-signed:docker:// prefix if not already present."""
-    if url.startswith("ostree-image-signed:docker://") or url.startswith(
+    if url.startswith(OSTREE_IMAGE_PREFIX) or url.startswith(
         "ostree-image-unsigned:docker://"
     ):
         return url
     elif url.startswith("docker://"):
-        # If it already has docker:// prefix, just add the ostree-image-signed part
         return f"ostree-image-signed:{url}"
     else:
-        # Add the complete prefix
-        return f"ostree-image-signed:docker://{url}"
-
-
-# Set up logging
-logger = logging.getLogger(__name__)
+        return f"{OSTREE_IMAGE_PREFIX}{url}"

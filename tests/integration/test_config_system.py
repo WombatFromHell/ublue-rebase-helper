@@ -27,6 +27,7 @@ from src.urh.config import (
 )
 
 
+@pytest.mark.integration
 class TestURHConfigDefaults:
     """Test URHConfig default configuration."""
 
@@ -72,6 +73,7 @@ class TestURHConfigDefaults:
         assert isinstance(config.settings.debug_mode, bool)
 
 
+@pytest.mark.integration
 class TestRepositoryConfigValidation:
     """Test RepositoryConfig validation logic."""
 
@@ -122,6 +124,7 @@ class TestRepositoryConfigValidation:
             RepositoryConfig(latest_dot_handling="invalid_value")
 
 
+@pytest.mark.integration
 class TestSettingsConfigValidation:
     """Test SettingsConfig validation logic."""
 
@@ -149,6 +152,7 @@ class TestSettingsConfigValidation:
         assert 0 < config.max_tags_display <= 1000
 
 
+@pytest.mark.integration
 class TestConfigManagerLoading:
     """Test ConfigManager config loading functionality."""
 
@@ -273,6 +277,7 @@ default = "ghcr.io/different/repo:stable"
         assert config_path.name == "urh.toml"
 
 
+@pytest.mark.integration
 class TestConfigParsing:
     """Test config parsing from TOML data."""
 
@@ -400,68 +405,7 @@ debug_mode = true
         assert config.settings.max_tags_display == 30
 
 
-class TestConfigSerialization:
-    """Test config serialization to TOML format."""
-
-    def test_serialize_boolean_values(self) -> None:
-        """Test boolean serialization."""
-        manager = ConfigManager()
-
-        assert manager._serialize_value(True) == "true"
-        assert manager._serialize_value(False) == "false"
-
-    def test_serialize_integer_values(self) -> None:
-        """Test integer serialization."""
-        manager = ConfigManager()
-
-        assert manager._serialize_value(42) == "42"
-        assert manager._serialize_value(0) == "0"
-        assert manager._serialize_value(-10) == "-10"
-
-    def test_serialize_string_values(self) -> None:
-        """Test string serialization with escaping."""
-        manager = ConfigManager()
-
-        assert manager._serialize_value("test") == '"test"'
-        assert (
-            manager._serialize_value("test\\with\\backslash")
-            == '"test\\\\with\\\\backslash"'
-        )
-
-    def test_serialize_empty_list(self) -> None:
-        """Test empty list serialization."""
-        manager = ConfigManager()
-
-        assert manager._serialize_value([]) == "[]"
-
-    def test_serialize_list_of_strings(self) -> None:
-        """Test list of strings serialization."""
-        manager = ConfigManager()
-
-        result = manager._serialize_value(["a", "b", "c"], indent=0)
-        assert '"a"' in result
-        assert '"b"' in result
-        assert '"c"' in result
-
-    def test_serialize_list_of_dicts(self) -> None:
-        """Test list of dicts serialization (transform patterns)."""
-        manager = ConfigManager()
-
-        data = [{"pattern": "test", "replacement": "repl"}]
-        result = manager._serialize_value(data, indent=0)
-        assert "pattern" in result
-        assert "replacement" in result
-
-    def test_serialize_dict(self) -> None:
-        """Test dict serialization."""
-        manager = ConfigManager()
-
-        data = {"key1": "value1", "key2": 42}
-        result = manager._serialize_value(data, indent=0)
-        assert "key1" in result
-        assert "key2" in result
-
-
+@pytest.mark.integration
 class TestCreateDefaultConfig:
     """Test default config file creation."""
 
@@ -512,6 +456,7 @@ class TestCreateDefaultConfig:
         assert len(config.repositories) > 0
 
 
+@pytest.mark.integration
 class TestGlobalGetConfig:
     """Test the global get_config function."""
 

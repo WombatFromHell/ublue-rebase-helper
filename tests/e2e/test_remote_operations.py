@@ -14,38 +14,21 @@ import pytest
 from pytest_mock import MockerFixture
 
 from src.urh.cli import main as cli_main
+from tests.conftest import apply_e2e_test_environment
 
 
+@pytest.mark.e2e
 class TestRemoteLsCommand:
     """Test remote-ls command end-to-end workflows."""
 
     @pytest.fixture(autouse=True)
-    def setup_remote_ls_environment(
-        self, mocker: MockerFixture, mock_rpm_ostree_commands
-    ) -> None:
+    def setup_remote_ls_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for remote-ls tests."""
-        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
-        mock_rpm_ostree_commands()
-
-        # Mock deployment info for header
-        mocker.patch(
-            "src.urh.deployment.get_current_deployment_info",
-            return_value={"repository": "test-repo", "version": "1.0.0"},
+        apply_e2e_test_environment(
+            mocker,
+            tty=True,
+            mock_sys_exit=True,
         )
-        mocker.patch(
-            "src.urh.deployment.format_deployment_header",
-            return_value="Current deployment: test-repo (1.0.0)",
-        )
-
-        # Force TTY mode
-        mocker.patch("os.isatty", return_value=True)
-
-        # Mock curl check
-        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
-
-        # Mock sys.exit
-        mocker.patch("sys.exit")
-
         # Mock subprocess for curl calls
         mock_run = mocker.patch("subprocess.run")
         mock_run.return_value = mocker.MagicMock(returncode=0, stdout="")
@@ -53,7 +36,7 @@ class TestRemoteLsCommand:
     def test_remote_ls_with_url_argument(self, mocker: MockerFixture) -> None:
         """Test remote-ls command with explicit URL argument."""
         # Mock OCIClient
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {
             "tags": ["v1.0.0", "v1.1.0", "v2.0.0"]
@@ -80,7 +63,7 @@ class TestRemoteLsCommand:
         mock_config.container_urls.options = ["ghcr.io/test/repo:stable"]
         mocker.patch("src.urh.config.get_config", return_value=mock_config)
 
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": ["v1.0.0"]}
         mock_client_class.return_value = mock_client
@@ -98,7 +81,7 @@ class TestRemoteLsCommand:
 
     def test_remote_ls_no_tags_found(self, mocker: MockerFixture) -> None:
         """Test remote-ls when no tags are found."""
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": []}
         mock_client_class.return_value = mock_client
@@ -113,7 +96,7 @@ class TestRemoteLsCommand:
 
     def test_remote_ls_error_fetching_tags(self, mocker: MockerFixture) -> None:
         """Test remote-ls when tag fetching fails."""
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = None  # Error case
         mock_client_class.return_value = mock_client
@@ -128,59 +111,45 @@ class TestRemoteLsCommand:
 
     def test_remote_ls_exits_with_success(self, mocker: MockerFixture) -> None:
         """Test remote-ls exits with code 0 on success."""
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": ["v1.0.0"]}
         mock_client_class.return_value = mock_client
 
-        mock_exit = mocker.patch("sys.exit")
-
         sys.argv = ["urh", "remote-ls", "ghcr.io/test/repo:tag"]
-        cli_main()
+        result = cli_main()
 
-        mock_exit.assert_called_once_with(0)
+        assert result == 0
 
     def test_remote_ls_exits_with_error_on_failure(self, mocker: MockerFixture) -> None:
         """Test remote-ls exits with code 1 on failure."""
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = None
         mock_client_class.return_value = mock_client
 
-        mock_exit = mocker.patch("sys.exit")
-
         sys.argv = ["urh", "remote-ls", "ghcr.io/test/repo:tag"]
-        cli_main()
+        result = cli_main()
 
-        mock_exit.assert_called_once_with(1)
+        assert result == 1
 
 
+@pytest.mark.e2e
 class TestOCIClientIntegration:
     """Test OCIClient integration with remote-ls command."""
 
     @pytest.fixture(autouse=True)
-    def setup_oci_environment(
-        self, mocker: MockerFixture, mock_rpm_ostree_commands
-    ) -> None:
+    def setup_oci_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for OCI client integration tests."""
-        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
-        mock_rpm_ostree_commands()
-
-        mocker.patch(
-            "src.urh.deployment.get_current_deployment_info",
-            return_value={"repository": "test-repo", "version": "1.0.0"},
+        apply_e2e_test_environment(
+            mocker,
+            tty=True,
+            mock_sys_exit=True,
         )
-        mocker.patch(
-            "src.urh.deployment.format_deployment_header",
-            return_value="Current deployment: test-repo (1.0.0)",
-        )
-        mocker.patch("os.isatty", return_value=True)
-        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
-        mocker.patch("sys.exit")
 
     def test_oci_client_created_with_repository(self, mocker: MockerFixture) -> None:
         """Test that OCIClient is created with extracted repository name."""
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": ["v1.0.0"]}
         mock_client_class.return_value = mock_client
@@ -193,7 +162,7 @@ class TestOCIClientIntegration:
 
     def test_fetch_repository_tags_called_with_url(self, mocker: MockerFixture) -> None:
         """Test that fetch_repository_tags is called with the full URL."""
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": ["v1.0.0"]}
         mock_client_class.return_value = mock_client
@@ -205,28 +174,18 @@ class TestOCIClientIntegration:
         mock_client.fetch_repository_tags.assert_called_once()
 
 
+@pytest.mark.e2e
 class TestTokenManagerIntegration:
     """Test token manager integration with remote-ls command."""
 
     @pytest.fixture(autouse=True)
-    def setup_token_environment(
-        self, mocker: MockerFixture, mock_rpm_ostree_commands
-    ) -> None:
+    def setup_token_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for token manager tests."""
-        # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
-        mock_rpm_ostree_commands()
-
-        mocker.patch(
-            "src.urh.deployment.get_current_deployment_info",
-            return_value={"repository": "test-repo", "version": "1.0.0"},
+        apply_e2e_test_environment(
+            mocker,
+            tty=True,
+            mock_sys_exit=True,
         )
-        mocker.patch(
-            "src.urh.deployment.format_deployment_header",
-            return_value="Current deployment: test-repo (1.0.0)",
-        )
-        mocker.patch("os.isatty", return_value=True)
-        mocker.patch("src.urh.system.check_curl_presence", return_value=True)
-        mocker.patch("sys.exit")
 
     def test_token_manager_initialized_with_repository(
         self, mocker: MockerFixture
@@ -238,7 +197,7 @@ class TestTokenManagerIntegration:
         mock_token_manager.get_token.return_value = "test_token"
         mock_token_manager_class.return_value = mock_token_manager
 
-        mock_client_class = mocker.patch("src.urh.commands.OCIClient")
+        mock_client_class = mocker.patch("src.urh.commands.remote_ls.OCIClient")
         mock_client = mocker.MagicMock()
         mock_client.fetch_repository_tags.return_value = {"tags": ["v1.0.0"]}
         mock_client_class.return_value = mock_client

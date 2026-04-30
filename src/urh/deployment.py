@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Dict, List, Optional
 
+from .constants import OSTREE_IMAGE_PREFIX
+
 # Import here to avoid circular import
 from .validators import is_valid_deployment_info
 
@@ -100,7 +102,7 @@ def _parse_single_deployment(line: str, lines: List[str], start_index: int) -> D
     is_pinned = False
 
     # Extract repository and tag from the ostree-image-signed line
-    if "ostree-image-signed:docker://" in line:
+    if OSTREE_IMAGE_PREFIX in line:
         repository = _extract_repository_from_line(line)
 
     # Look ahead for more information
@@ -221,3 +223,11 @@ def format_menu_header(
     separator = format_menu_separator()
 
     return f"{version_header}\n{separator}\n{deployment_header}\n{separator}"
+
+
+def build_persistent_header() -> str:
+    """Build a persistent header with version and current deployment info."""
+    from .constants import format_version_header
+
+    deployment_info = get_current_deployment_info()
+    return format_menu_header(format_version_header(), deployment_info)

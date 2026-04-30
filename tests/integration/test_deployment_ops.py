@@ -17,7 +17,7 @@ from typing import List
 import pytest
 from pytest_mock import MockerFixture
 
-from src.urh.commands import CommandRegistry
+from src.urh.commands.registry import CommandRegistry
 from src.urh.deployment import (
     DeploymentInfo,
     format_deployment_header,
@@ -27,6 +27,7 @@ from src.urh.deployment import (
 )
 
 
+@pytest.mark.integration
 class TestParseDeploymentInfo:
     """Test parse_deployment_info function with various inputs."""
 
@@ -146,6 +147,7 @@ Deployments:
         assert "testing" in deployment.repository
 
 
+@pytest.mark.integration
 class TestGetCurrentDeploymentInfo:
     """Test get_current_deployment_info function."""
 
@@ -189,6 +191,7 @@ class TestGetCurrentDeploymentInfo:
         assert current is None
 
 
+@pytest.mark.integration
 class TestGetDeploymentInfo:
     """Test get_deployment_info function (subprocess integration)."""
 
@@ -198,7 +201,6 @@ class TestGetDeploymentInfo:
     ) -> None:
         """Setup mocks for deployment info tests."""
         # Mock rpm-ostree and ostree commands to prevent FileNotFoundError
-        mock_rpm_ostree_commands()
 
     def test_get_deployment_info_calls_rpm_ostree(self, mocker: MockerFixture) -> None:
         """Test that get_deployment_info calls rpm-ostree status -v."""
@@ -246,6 +248,7 @@ Deployments:
         assert len(deployments) == 0
 
 
+@pytest.mark.integration
 class TestFormatDeploymentHeader:
     """Test format_deployment_header function."""
 
@@ -270,13 +273,9 @@ class TestFormatDeploymentHeader:
         assert "unable to retrieve" in header.lower()
 
 
+@pytest.mark.integration
 class TestCommandRegistryDeploymentHelpers:
-    """Test CommandRegistry deployment helper methods."""
-
-    @pytest.fixture
-    def command_registry(self) -> CommandRegistry:
-        """Create CommandRegistry instance for testing."""
-        return CommandRegistry()
+    """Test deployment helper functions from deployment_helpers module."""
 
     @pytest.fixture
     def sample_deployments(self) -> List[DeploymentInfo]:
@@ -307,11 +306,12 @@ class TestCommandRegistryDeploymentHelpers:
 
     def test_filter_unpinned_deployments(
         self,
-        command_registry: CommandRegistry,
         sample_deployments: List[DeploymentInfo],
     ) -> None:
         """Test filtering unpinned deployments for pin submenu."""
-        unpinned = command_registry._filter_unpinned_deployments(sample_deployments)
+        from src.urh.commands.deployment_helpers import filter_unpinned_deployments
+
+        unpinned = filter_unpinned_deployments(sample_deployments)
 
         assert len(unpinned) == 2
         # Should include current (testing) and unpinned (unstable)
@@ -337,11 +337,12 @@ class TestCommandRegistryDeploymentHelpers:
 
     def test_create_deployment_menu_items(
         self,
-        command_registry: CommandRegistry,
         sample_deployments: List[DeploymentInfo],
     ) -> None:
         """Test creating menu items from deployment list."""
-        items = command_registry._create_deployment_menu_items(sample_deployments)
+        from src.urh.commands.deployment_helpers import create_deployment_menu_items
+
+        items = create_deployment_menu_items(sample_deployments)
 
         assert len(items) == 3
         # Items should be reversed (newest first)
@@ -352,11 +353,12 @@ class TestCommandRegistryDeploymentHelpers:
 
     def test_create_deployment_menu_items_shows_pinned_indicator(
         self,
-        command_registry: CommandRegistry,
         sample_deployments: List[DeploymentInfo],
     ) -> None:
         """Test that pinned deployments show indicator in menu."""
-        items = command_registry._create_deployment_menu_items(sample_deployments)
+        from src.urh.commands.deployment_helpers import create_deployment_menu_items
+
+        items = create_deployment_menu_items(sample_deployments)
 
         # Items are reversed (newest first), so stable (index 1, pinned) should have '*'
         # Find the item with the '*' indicator
@@ -366,18 +368,18 @@ class TestCommandRegistryDeploymentHelpers:
         assert len(pinned_items) == 1
         assert "stable" in pinned_items[0].description
 
-    def test_create_deployment_menu_items_empty_list(
-        self, command_registry: CommandRegistry
-    ) -> None:
+    def test_create_deployment_menu_items_empty_list(self) -> None:
         """Test creating menu items from empty deployment list."""
-        items = command_registry._create_deployment_menu_items([])
+        from src.urh.commands.deployment_helpers import create_deployment_menu_items
+
+        items = create_deployment_menu_items([])
 
         assert len(items) == 0
 
-    def test_filter_with_no_unpinned_matches(
-        self, command_registry: CommandRegistry
-    ) -> None:
+    def test_filter_with_no_unpinned_matches(self) -> None:
         """Test filtering when no deployments match criteria."""
+        from src.urh.commands.deployment_helpers import filter_unpinned_deployments
+
         # All deployments are pinned
         all_pinned = [
             DeploymentInfo(
@@ -389,10 +391,11 @@ class TestCommandRegistryDeploymentHelpers:
             ),
         ]
 
-        unpinned = command_registry._filter_unpinned_deployments(all_pinned)
+        unpinned = filter_unpinned_deployments(all_pinned)
         assert len(unpinned) == 0
 
 
+@pytest.mark.integration
 class TestDeploymentInfoDataclass:
     """Test DeploymentInfo dataclass functionality."""
 

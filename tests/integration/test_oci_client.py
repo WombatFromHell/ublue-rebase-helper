@@ -22,6 +22,7 @@ from pytest_mock import MockerFixture
 from src.urh.oci_client import OCIClient
 
 
+@pytest.mark.integration
 class TestOCIClientHTTPResponseParsing:
     """Test HTTP response parsing in OCIClient."""
 
@@ -90,25 +91,8 @@ class TestOCIClientHTTPResponseParsing:
 
         assert result == (None, None, None)
 
-    def test_validate_parse_result_valid(self, oci_client: OCIClient) -> None:
-        """Test validation of valid parse result."""
-        parse_result = (
-            "HTTP/2 200",
-            '{"tags": []}',
-            {"content-type": "application/json"},
-        )
 
-        assert oci_client._validate_parse_result(parse_result) is True
-
-    def test_validate_parse_result_missing_components(
-        self, oci_client: OCIClient
-    ) -> None:
-        """Test validation fails for missing components."""
-        parse_result = (None, '{"tags": []}', {"content-type": "application/json"})
-
-        assert oci_client._validate_parse_result(parse_result) is False
-
-
+@pytest.mark.integration
 class TestOCIClientPagination:
     """Test pagination logic in OCIClient."""
 
@@ -281,6 +265,7 @@ class TestOCIClientPagination:
         assert "v4.0" in result["tags"]
 
 
+@pytest.mark.integration
 class TestOCIClientAuthHandling:
     """Test authentication error handling in OCIClient."""
 
@@ -382,6 +367,7 @@ class TestOCIClientAuthHandling:
         assert next_url is None
 
 
+@pytest.mark.integration
 class TestOCIClientJSONParsing:
     """Test JSON response parsing in OCIClient."""
 
@@ -441,6 +427,7 @@ class TestOCIClientJSONParsing:
         assert data is None
 
 
+@pytest.mark.integration
 class TestOCIClientTagFiltering:
     """Test tag filtering integration in OCIClient."""
 
@@ -558,77 +545,3 @@ class TestOCIClientTagFiltering:
         result = oci_client_with_config.fetch_repository_tags()
 
         assert result is None
-
-
-class TestOCIClientCurlCommandBuilding:
-    """Test curl command building in OCIClient."""
-
-    @pytest.fixture
-    def oci_client_curl_mocks(self, mocker: MockerFixture) -> OCIClient:
-        """Create OCIClient for curl command building tests."""
-        mock_token_manager = mocker.MagicMock()
-        mock_token_manager.get_token.return_value = "test_token"
-        mock_token_manager.invalidate_cache = mocker.MagicMock()
-        mock_token_manager.parse_link_header = mocker.MagicMock()
-
-        client = OCIClient("test/repo")
-        client.token_manager = mock_token_manager
-        return client
-
-    def test_build_curl_command_with_options(
-        self, oci_client_curl_mocks: OCIClient
-    ) -> None:
-        """Test building curl command with various options."""
-        cmd = oci_client_curl_mocks._build_curl_command_with_options(
-            url="https://ghcr.io/v2/test/repo/tags/list",
-            token="test_token",
-            capture_headers=True,
-            capture_body=True,
-            capture_status_code=False,
-            timeout=30,
-        )
-
-        assert "curl" in cmd
-        assert "-s" in cmd
-        assert "--http2" in cmd
-        assert "--max-time" in cmd
-        assert "30" in cmd
-        assert "--globoff" in cmd
-        assert "--compressed" in cmd
-        assert "-i" in cmd  # capture_headers
-        assert "-H" in cmd
-        assert "Authorization: Bearer test_token" in cmd
-        assert "https://ghcr.io/v2/test/repo/tags/list" in cmd
-
-    def test_build_curl_command_without_headers(
-        self, oci_client_curl_mocks: OCIClient
-    ) -> None:
-        """Test building curl command without header capture."""
-        cmd = oci_client_curl_mocks._build_curl_command_with_options(
-            url="https://ghcr.io/v2/test/repo/tags/list",
-            token="test_token",
-            capture_headers=False,
-            capture_body=True,
-            capture_status_code=False,
-            timeout=30,
-        )
-
-        assert "-i" not in cmd  # No header capture
-        # -o /dev/null only added when both capture_body=False AND capture_status_code=False
-        assert "-o" not in cmd  # Body capture enabled
-
-    def test_build_curl_command_with_status_code(
-        self, oci_client_curl_mocks: OCIClient
-    ) -> None:
-        """Test building curl command with status code capture."""
-        cmd = oci_client_curl_mocks._build_curl_command_with_options(
-            url="https://ghcr.io/v2/test/repo/tags/list",
-            token="test_token",
-            capture_headers=False,
-            capture_body=False,
-            capture_status_code=True,
-            timeout=30,
-        )
-
-        assert "-w" in cmd
-        assert "%{http_code}" in cmd
