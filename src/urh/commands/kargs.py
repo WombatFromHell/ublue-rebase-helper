@@ -230,7 +230,10 @@ def handle_kargs(
         return _run_command(cmd)
 
     subcommand = args[0]
-    handler = _SUBCOMMAND_HANDLERS.get(subcommand)
+    try:
+        handler = _SUBCOMMAND_HANDLERS.get(KargsSubcommand(subcommand))
+    except ValueError:
+        handler = None
 
     if handler:
         return handler(args[1:])
