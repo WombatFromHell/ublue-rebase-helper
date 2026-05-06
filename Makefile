@@ -12,10 +12,9 @@ ARTIFACT = urh.pyz
 OUT = $(BUILD_DIR)/$(ARTIFACT)
 VERSION_FILE = $(SRC_DIR)/urh/constants.py
 
-# Ensure SOURCE_DATE_EPOCH is set for deterministic timestamps
-# Default to Jan 1, 1980 00:00:00 UTC (315532800) if not set
-SOURCE_DATE_EPOCH ?= 315532800
-export SOURCE_DATE_EPOCH
+# Fixed epoch for reproducible builds:
+# Use epoch 1 (Jan 1, 1970) for maximum determinism
+SOURCE_DATE_EPOCH ?= 1
 
 # Extract version from pyproject.toml
 VERSION := $(shell grep '^version = ' pyproject.toml | cut -d'"' -f2)
@@ -30,13 +29,16 @@ clean:
 	.pytest_cache \
 	.ruff_cache \
 	.coverage \
-	.direnv
+	.direnv \
+	.pi \
+	result*
 
 configure:
 	uv venv --clear
 	uv sync --frozen
 
 build: clean
+	export SOURCE_DATE_EPOCH=1
 	@echo "Building $(ARTIFACT) (version $(VERSION))"
 	@echo "SOURCE_DATE_EPOCH: $(SOURCE_DATE_EPOCH) ($(TIMESTAMP))"
 	mkdir -p $(BUILD_DIR)
@@ -62,7 +64,7 @@ build: clean
 	# -q: quiet mode
 	# Using 'find | LC_ALL=C sort' ensures consistent file ordering across systems
 	cd $(BUILD_DIR)/staging && \
-		find . -type f | LC_ALL=C sort | \
+		find . \( -type d -o -type f \) | LC_ALL=C sort | \
 		zip -X -q -@ ../archive.zip
 
 	# Prepend shebang to create executable pyz
@@ -111,7 +113,17 @@ quality: lint format
 radon:
 	uv run radon cc ./src/urh/ -a
 
-ci: configure quality test build
+ci: configure test lint build
+
+build-nix: clean
+	@echo "Building $(ARTIFACT) via Nix (version $(VERSION))"
+	mkdir -p $(BUILD_DIR)
+	nix build . --out-link ./$(OUT)
+	cd $(BUILD_DIR) && sha256sum $(ARTIFACT) > $(ARTIFACT).sha256sum
+	@echo "Built: $(OUT)"
+	@echo "SHA256: $$(cat $(OUT).sha256sum | cut -d' ' -f1)"
+
+ci-nix: lint test build-nix
 
 all: build install
 

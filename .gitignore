@@ -4,6 +4,8 @@
 .venv
 .direnv
 .build
+.pi
+result
 __pycache__
 dist
 
