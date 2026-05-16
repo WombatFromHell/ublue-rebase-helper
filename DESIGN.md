@@ -126,9 +126,9 @@ sequenceDiagram
 
 | Command     | Handler                      | Sudo    | Flow                                                         |
 | ----------- | ---------------------------- | ------- | ------------------------------------------------------------ |
-| `check`     | `simple_ops.handle_check`    | no      | `rpm-ostree upgrade --check`                                 |
+| `check`     | `simple_ops.handle_check`    | yes     | `bootc upgrade --check`                                      |
 | `ls`        | `simple_ops.handle_ls`       | no      | `rpm-ostree status -v`                                       |
-| `upgrade`   | `simple_ops.handle_upgrade`  | yes     | `rpm-ostree upgrade`                                         |
+| `upgrade`   | `simple_ops.handle_upgrade`  | yes     | `bootc upgrade`                                              |
 | `rollback`  | `simple_ops.handle_rollback` | yes     | `rpm-ostree rollback`                                        |
 | `rebase`    | `rebase.handle_rebase`       | yes     | menu/arg → `resolve_tag_to_full_url()` → `rpm-ostree rebase` |
 | `kargs`     | `kargs.handle_kargs`         | dynamic | submenu or subcommand → `rpm-ostree kargs`                   |

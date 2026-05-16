@@ -36,7 +36,7 @@ class TestMainMenuNavigation:
             mocker,
             tty=True,
             mock_execvp=True,
-            execvp_cmd=["sudo", "rpm-ostree", "upgrade"],
+            execvp_cmd=["sudo", "bootc", "upgrade"],
             mock_sys_exit=True,
         )
 
@@ -62,13 +62,13 @@ class TestMainMenuNavigation:
         mock_menu_show = mocker.patch("src.urh.menu.MenuSystem.show_menu")
         mock_menu_show.return_value = "upgrade"
 
-        expected_cmd = ["sudo", "rpm-ostree", "upgrade"]
+        expected_cmd = ["sudo", "bootc", "upgrade"]
 
         sys.argv = ["urh"]
         last_call_args = mock_execvp_command(mocker, expected_cmd)
 
         # Verify upgrade command was executed
-        assert "rpm-ostree" in last_call_args
+        assert "bootc" in last_call_args
         assert "upgrade" in last_call_args
 
     def test_main_menu_esc_exits_application(self, mocker: MockerFixture) -> None:

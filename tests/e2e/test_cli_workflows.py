@@ -33,8 +33,8 @@ class TestCLIDirectCommandExecution:
     @pytest.mark.parametrize(
         "command,args,expected_base_cmd,exit_code",
         [
-            ("check", [], ["rpm-ostree", "upgrade", "--check"], 0),
-            ("upgrade", [], ["sudo", "rpm-ostree", "upgrade"], 0),
+            ("check", [], ["sudo", "bootc", "upgrade", "--check"], 0),
+            ("upgrade", [], ["sudo", "bootc", "upgrade"], 0),
             ("rollback", [], ["sudo", "rpm-ostree", "rollback"], 0),
         ],
     )
@@ -197,7 +197,7 @@ class TestCLIErrorHandling:
             mocker,
             tty=False,
             mock_execvp=True,
-            execvp_cmd=["sudo", "rpm-ostree", "upgrade"],
+            execvp_cmd=["sudo", "bootc", "upgrade"],
         )
 
     def test_curl_missing_exits_with_error(
@@ -224,7 +224,7 @@ class TestCLIErrorHandling:
         self, mocker: MockerFixture, cli_command
     ) -> None:
         """Test that command execution uses execvp (process is replaced)."""
-        expected_cmd = ["rpm-ostree", "upgrade", "--check"]
+        expected_cmd = ["sudo", "bootc", "upgrade", "--check"]
 
         cli_command(["urh", "check"])
 
@@ -235,7 +235,7 @@ class TestCLIErrorHandling:
         self, mocker: MockerFixture, cli_command
     ) -> None:
         """Test that command is executed via execvp (no timeout handling needed)."""
-        expected_cmd = ["rpm-ostree", "upgrade", "--check"]
+        expected_cmd = ["sudo", "bootc", "upgrade", "--check"]
 
         cli_command(["urh", "check"])
 

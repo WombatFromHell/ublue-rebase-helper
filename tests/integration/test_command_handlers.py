@@ -92,8 +92,8 @@ class TestSimpleCommandHandlers:
     @pytest.mark.parametrize(
         "command,expected_cmd",
         [
-            ("check", ["rpm-ostree", "upgrade", "--check"]),
-            ("upgrade", ["sudo", "rpm-ostree", "upgrade"]),
+            ("check", ["sudo", "bootc", "upgrade", "--check"]),
+            ("upgrade", ["sudo", "bootc", "upgrade"]),
             ("rollback", ["sudo", "rpm-ostree", "rollback"]),
         ],
     )

@@ -11,7 +11,7 @@ from ..system import _run_command, build_command
 
 def handle_check(args: List[str]) -> int:
     """Handle the check command."""
-    cmd = ["rpm-ostree", "upgrade", "--check"]
+    cmd = build_command(True, ["bootc", "upgrade", "--check"])
     return _run_command(cmd)
 
 
@@ -40,7 +40,7 @@ def handle_ls(args: List[str]) -> int:
 
 def handle_upgrade(args: List[str]) -> int:
     """Handle the upgrade command."""
-    cmd = build_command(True, ["rpm-ostree", "upgrade"])
+    cmd = build_command(True, ["bootc", "upgrade"])
     return _run_command(cmd)
 
 

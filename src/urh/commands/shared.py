@@ -12,7 +12,7 @@ from typing import (
     TypeVar,
 )
 
-from ..system import _run_command, is_running_as_root
+from ..system import _run_command, get_elevation_command, is_running_as_root
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -68,18 +68,26 @@ def run_command_with_conditional_sudo(
     requires_sudo: bool,
     conditional_sudo_func: Optional[SudoConditionFunc] = None,
 ) -> int:
-    """Execute a command with conditional sudo based on the requires_sudo setting."""
-    # Determine if sudo is needed
+    """Execute a command with conditional elevation based on the requires_sudo setting.
+
+    Uses pkexec when in a graphical session with pkexec available, falling back
+    to sudo otherwise.
+    """
+    # Determine if elevation is needed
     if conditional_sudo_func is not None:
-        # Use the conditional function to determine if sudo is needed
-        needs_sudo = conditional_sudo_func(args)
+        # Use the conditional function to determine if elevation is needed
+        needs_elevation = conditional_sudo_func(args)
     else:
         # Use the static boolean value
-        needs_sudo = requires_sudo
+        needs_elevation = requires_sudo
 
-    # Build the command (skip sudo if already running as root)
-    if needs_sudo and not is_running_as_root():
-        cmd = ["sudo", *base_cmd]
+    # Build the command (skip elevation if already running as root)
+    if needs_elevation and not is_running_as_root():
+        elevation = get_elevation_command()
+        if elevation is not None:
+            cmd = [elevation, *base_cmd]
+        else:
+            cmd = base_cmd[:]
     else:
         cmd = base_cmd[:]
 

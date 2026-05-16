@@ -40,7 +40,7 @@ def test_check_command_executes_rpm_ostree(mocker):
 
     cli_main()  # Test actual CLI entry point
 
-    mock_run.assert_called_with(["rpm-ostree", "upgrade", "--check"])
+    mock_run.assert_called_with(["sudo", "bootc", "upgrade", "--check"])
 
 # ❌ WRONG: Mocking the SUT (command handler)
 def test_check_command(mocker):
@@ -329,7 +329,7 @@ def test_check_command(mocker):
     mock_run = mocker.patch("subprocess.run")
     sys.argv = ["urh", "check"]
     cli_main()
-    mock_run.assert_called_with(["rpm-ostree", "upgrade", "--check"])
+    mock_run.assert_called_with(["sudo", "bootc", "upgrade", "--check"])
 
 # ❌ WRONG: Context manager nesting (hard to scale)
 def test_multiple_mocks(mocker):
@@ -561,7 +561,7 @@ class TestFeature:
         cli_main()
 
         # Assert
-        mock_run.assert_called_with(["rpm-ostree", "upgrade", "--check"])
+        mock_run.assert_called_with(["sudo", "bootc", "upgrade", "--check"])
         mock_exit.assert_called_once_with(0)
 
     def test_error_case(self, mocker):
@@ -583,8 +583,8 @@ class TestFeature:
 
 ```python
 @pytest.mark.parametrize("command,expected_cmd,exit_code", [
-    ("check", ["rpm-ostree", "upgrade", "--check"], 0),
-    ("upgrade", ["sudo", "rpm-ostree", "upgrade"], 0),
+    ("check", ["sudo", "bootc", "upgrade", "--check"], 0),
+    ("upgrade", ["sudo", "bootc", "upgrade"], 0),
     ("rollback", ["sudo", "rpm-ostree", "rollback"], 0),
 ])
 def test_commands_execute_correctly(
@@ -621,7 +621,7 @@ class TestCommandHandlers:
         registry = CommandRegistry()
         registry._handle_check([])
 
-        mock_run.assert_called_once_with(["rpm-ostree", "upgrade", "--check"])
+        mock_run.assert_called_once_with(["sudo", "bootc", "upgrade", "--check"])
         mock_exit.assert_called_once_with(0)
 
     def test_handler_with_submenu(self, mocker, mock_menu_show):

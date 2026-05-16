@@ -368,7 +368,7 @@ def apply_e2e_test_environment(
         If True, patch sys.exit to prevent actual exits.
     execvp_cmd : list[str], optional
         Command to use in ExecCompleted exception. Defaults to
-        ["sudo", "rpm-ostree", "upgrade"] if mock_execvp is True.
+        ["sudo", "bootc", "upgrade"] if mock_execvp is True.
     """
 
     def _mock_subprocess(cmd: list, **kwargs: Any) -> Any:
@@ -425,7 +425,7 @@ Deployments:
 
     # Optionally mock os.execvp
     if mock_execvp:
-        cmd = execvp_cmd or ["sudo", "rpm-ostree", "upgrade"]
+        cmd = execvp_cmd or ["sudo", "bootc", "upgrade"]
         mocker.patch("os.execvp", side_effect=ExecCompleted(cmd))
 
     # Optionally mock sys.exit
@@ -485,7 +485,7 @@ def mock_execvp_command(
 
 @pytest.fixture(
     params=[
-        ("check", False),
+        ("check", True),
         ("ls", False),
         ("upgrade", True),
         ("rollback", True),

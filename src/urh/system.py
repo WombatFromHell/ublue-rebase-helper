@@ -26,18 +26,30 @@ def is_running_as_root() -> bool:
     return _cache_is_root
 
 
+def get_elevation_command() -> str | None:
+    """Get the command to use for privilege escalation.
+
+    Returns 'sudo' if elevation is needed, or None if already running as root.
+    """
+    if is_running_as_root():
+        return None
+    return "sudo"
+
+
 def build_command(requires_sudo: bool, base_cmd: List[str]) -> List[str]:
-    """Build a command list, prepending sudo only if elevation is required.
+    """Build a command list, prepending 'sudo' if elevation is needed.
 
     Args:
         requires_sudo: Whether the command needs root privileges.
-        base_cmd: The command to run (without sudo).
+        base_cmd: The command to run (without elevation).
 
     Returns:
         Command list with sudo prepended if needed.
     """
-    if requires_sudo and not is_running_as_root():
-        return ["sudo", *base_cmd]
+    if requires_sudo:
+        elevation = get_elevation_command()
+        if elevation is not None:
+            return [elevation, *base_cmd]
     return base_cmd[:]
 
 

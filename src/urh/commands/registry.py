@@ -37,7 +37,7 @@ class CommandRegistry:
                 name="check",
                 description="Check for available updates",
                 handler=lambda args: simple_ops.handle_check(args),
-                requires_sudo=False,
+                requires_sudo=True,
             ),
             "kargs": CommandDefinition(
                 name="kargs",
