@@ -45,6 +45,7 @@ class CommandRegistry:
                 handler=lambda args: kargs.handle_kargs(args, self._menu_system),
                 requires_sudo=False,  # Default value for compatibility with tests
                 conditional_sudo_func=self._should_use_sudo_for_kargs,  # Use function for conditional sudo
+                has_submenu=True,
             ),
             "ls": CommandDefinition(
                 name="ls",

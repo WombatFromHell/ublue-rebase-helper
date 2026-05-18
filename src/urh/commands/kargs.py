@@ -219,10 +219,9 @@ def handle_kargs(
             if selected is None:
                 return 0
 
-            _route_menu_selection(selected)
+            return _route_menu_selection(selected)
         except MenuExitException:
             return 0
-        return 0
 
     help_flags = {"--help", "-h", "--help-all"}
     if any(arg in help_flags for arg in args):

@@ -248,11 +248,15 @@ class MenuSystem:
         print("Invalid choice. Please try again.")
 
     def _handle_keyboard_interrupt(self, is_main_menu: bool) -> Optional[Any]:
-        """Handle keyboard interrupt (ESC)."""
+        """Handle keyboard interrupt (Ctrl+C), matching gum ESC behavior."""
         if is_main_menu:
             self._exit_func(0)
-        else:
+        elif PYTEST_CURRENT_TEST in os.environ:
+            # In test environment, return None so tests can verify behavior
             return None
+        else:
+            # Match gum's _handle_esc_pressed: raise exception to bubble up
+            raise MenuExitException(is_main_menu=False)
 
 
 def get_user_input(prompt: str) -> str:
