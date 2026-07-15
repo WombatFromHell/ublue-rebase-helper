@@ -197,7 +197,7 @@ class TestKargsCommand:
             (
                 "delete",
                 ["delete", "quiet"],
-                ["sudo", "rpm-ostree", "kargs", "--delete=quiet"],
+                ["sudo", "rpm-ostree", "kargs", "--delete-if-present=quiet"],
             ),
             (
                 "delete",
@@ -206,8 +206,8 @@ class TestKargsCommand:
                     "sudo",
                     "rpm-ostree",
                     "kargs",
-                    "--delete=quiet",
-                    "--delete=loglevel",
+                    "--delete-if-present=quiet",
+                    "--delete-if-present=loglevel",
                 ],
             ),
             (
@@ -217,8 +217,8 @@ class TestKargsCommand:
                     "sudo",
                     "rpm-ostree",
                     "kargs",
-                    "--delete=quiet",
-                    "--delete=loglevel",
+                    "--delete-if-present=quiet",
+                    "--delete-if-present=loglevel",
                 ],
             ),
             (
@@ -247,6 +247,11 @@ class TestKargsCommand:
                     "--replace=loglevel=3",
                     "--replace=splash=silent",
                 ],
+            ),
+            (
+                "editor",
+                ["editor"],
+                ["sudo", "rpm-ostree", "kargs", "--editor"],
             ),
         ],
     )
@@ -287,7 +292,7 @@ class TestKargsCommand:
         handle_kargs(["delete", "quiet"], menu_system=None)
 
         call_args = mock_run.call_args[0][0]
-        assert call_args == ["sudo", "rpm-ostree", "kargs", "--delete=quiet"]
+        assert call_args == ["sudo", "rpm-ostree", "kargs", "--delete-if-present=quiet"]
 
     def test_kargs_delete_subcommand_multiple_args(
         self, mocker: MockerFixture, mock_rpm_ostree_commands
@@ -302,8 +307,8 @@ class TestKargsCommand:
             "sudo",
             "rpm-ostree",
             "kargs",
-            "--delete=quiet",
-            "--delete=loglevel",
+            "--delete-if-present=quiet",
+            "--delete-if-present=loglevel",
         ]
 
     def test_kargs_delete_subcommand_space_delimited(
@@ -319,8 +324,8 @@ class TestKargsCommand:
             "sudo",
             "rpm-ostree",
             "kargs",
-            "--delete=quiet",
-            "--delete=loglevel",
+            "--delete-if-present=quiet",
+            "--delete-if-present=loglevel",
         ]
 
     def test_kargs_delete_subcommand_no_args_error(
@@ -432,6 +437,94 @@ class TestKargsCommand:
         assert "sudo" in call_args
         assert "rpm-ostree" in call_args
         assert "kargs" in call_args
+
+    @pytest.mark.parametrize(
+        "menu_selection,user_input,expected_flags",
+        [
+            ("append", "quiet", ["--append-if-missing=quiet"]),
+            (
+                "append",
+                "quiet loglevel=3",
+                ["--append-if-missing=quiet", "--append-if-missing=loglevel=3"],
+            ),
+            ("delete", "quiet", ["--delete-if-present=quiet"]),
+            (
+                "delete",
+                "quiet loglevel",
+                ["--delete-if-present=quiet", "--delete-if-present=loglevel"],
+            ),
+            ("replace", "loglevel=3", ["--replace=loglevel=3"]),
+            (
+                "replace",
+                "loglevel=3 splash=silent",
+                ["--replace=loglevel=3", "--replace=splash=silent"],
+            ),
+        ],
+    )
+    def test_kargs_menu_subcommand_single_and_multi_karg(
+        self,
+        mocker: MockerFixture,
+        mock_rpm_ostree_commands,
+        menu_selection: str,
+        user_input: str,
+        expected_flags: list,
+    ) -> None:
+        """Test menu path passes correct flags for single and multiple kargs."""
+        mock_run = mocker.patch("src.urh.commands.kargs._run_command", return_value=0)
+        mocker.patch(
+            "src.urh.commands.kargs._prompt_for_karg_value", return_value=user_input
+        )
+        mock_menu = mocker.MagicMock()
+        mock_menu.show_menu.return_value = menu_selection
+
+        handle_kargs([], menu_system=mock_menu)
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "sudo"
+        assert call_args[1:3] == ["rpm-ostree", "kargs"]
+        assert call_args[3:] == expected_flags
+
+    def test_kargs_menu_editor_subcommand(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
+        """Test menu path for editor subcommand runs --editor."""
+        mock_run = mocker.patch("src.urh.commands.kargs._run_command", return_value=0)
+        mock_menu = mocker.MagicMock()
+        mock_menu.show_menu.return_value = "editor"
+
+        handle_kargs([], menu_system=mock_menu)
+
+        call_args = mock_run.call_args[0][0]
+        assert call_args == ["sudo", "rpm-ostree", "kargs", "--editor"]
+
+    def test_kargs_menu_empty_input_returns_error(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
+        """Test menu path returns error on empty input."""
+        mocker.patch("src.urh.commands.kargs._prompt_for_karg_value", return_value="  ")
+        mock_run = mocker.patch("src.urh.commands.kargs._run_command", return_value=0)
+        mocker.patch("builtins.print")
+        mock_menu = mocker.MagicMock()
+        mock_menu.show_menu.return_value = "append"
+
+        result = handle_kargs([], menu_system=mock_menu)
+
+        assert result == 1
+        mock_run.assert_not_called()
+
+    def test_kargs_menu_cancel_returns_zero(
+        self, mocker: MockerFixture, mock_rpm_ostree_commands
+    ) -> None:
+        """Test menu path returns 0 on prompt cancel (None)."""
+        mocker.patch("src.urh.commands.kargs._prompt_for_karg_value", return_value=None)
+        mock_run = mocker.patch("src.urh.commands.kargs._run_command", return_value=0)
+        mock_menu = mocker.MagicMock()
+        mock_menu.show_menu.return_value = "delete"
+
+        result = handle_kargs([], menu_system=mock_menu)
+
+        assert result == 0
+        mock_run.assert_not_called()
 
 
 @pytest.mark.integration

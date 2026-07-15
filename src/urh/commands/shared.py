@@ -41,6 +41,7 @@ class KargsSubcommand(StrEnum):
 
     APPEND = "append"
     DELETE = "delete"
+    EDITOR = "editor"
     REPLACE = "replace"
     SHOW = "show"
 

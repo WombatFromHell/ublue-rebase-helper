@@ -28,6 +28,7 @@ def should_use_sudo_for_kargs(args: List[str]) -> bool:
     if args[0] in {
         KargsSubcommand.APPEND,
         KargsSubcommand.DELETE,
+        KargsSubcommand.EDITOR,
         KargsSubcommand.REPLACE,
     }:
         return True
@@ -37,6 +38,7 @@ def should_use_sudo_for_kargs(args: List[str]) -> bool:
         "--append-if-missing",
         "--delete",
         "--delete-if-present",
+        "--editor",
         "--replace",
         "--edit",
     }
@@ -88,6 +90,12 @@ def _handle_kargs_show(args: List[str]) -> int:
     return _run_command(cmd)
 
 
+def _handle_kargs_editor() -> int:
+    """Handle kargs editor subcommand."""
+    base_cmd = build_command(True, ["rpm-ostree", "kargs"])
+    return _run_command(base_cmd + ["--editor"])
+
+
 def _execute_kargs_subcommand(
     args: List[str],
     subcommand_name: str,
@@ -137,7 +145,7 @@ _APPEND: tuple[Callable[[str], bool], Callable[[str], str]] = (
 )
 _DELETE: tuple[Callable[[str], bool], Callable[[str], str]] = (
     lambda k: k.replace("_", "").replace("-", "").replace(".", "").isalnum(),
-    lambda k: f"--delete={k}",
+    lambda k: f"--delete-if-present={k}",
 )
 _REPLACE: tuple[Callable[[str], bool], Callable[[str], str]] = (
     lambda k: "=" in k,
@@ -147,6 +155,7 @@ _REPLACE: tuple[Callable[[str], bool], Callable[[str], str]] = (
 _SUBCOMMAND_HANDLERS = {
     KargsSubcommand.APPEND: lambda a: _execute_kargs_subcommand(a, "append", *_APPEND),
     KargsSubcommand.DELETE: lambda a: _execute_kargs_subcommand(a, "delete", *_DELETE),
+    KargsSubcommand.EDITOR: lambda a: _handle_kargs_editor(),
     KargsSubcommand.REPLACE: lambda a: _execute_kargs_subcommand(
         a, "replace", *_REPLACE
     ),
@@ -189,6 +198,7 @@ def _build_kargs_menu_items() -> List[Any]:
         ListItem("append", "Append a kernel argument (--append-if-missing)"),
         ListItem("delete", "Delete a kernel argument (--delete-if-present)"),
         ListItem("replace", "Replace a kernel argument (--replace)"),
+        ListItem("editor", "Edit kernel arguments in editor (--editor)"),
     ]
 
 
@@ -248,10 +258,13 @@ def _route_menu_selection(selected: str) -> int:
     if selected == "show":
         return _handle_kargs_show([])
 
+    if selected == "editor":
+        return _handle_kargs_editor()
+
     prompt_map: dict[str, str] = {
-        "append": "Enter kernel argument (e.g., quiet or loglevel=3): ",
-        "delete": "Enter kernel argument key to delete (e.g., quiet): ",
-        "replace": "Enter kernel argument replacement (e.g., loglevel=3): ",
+        "append": "Enter kernel argument(s), space-separated (e.g., quiet loglevel=3): ",
+        "delete": "Enter kernel argument key(s), space-separated (e.g., quiet loglevel): ",
+        "replace": "Enter kernel argument replacement(s), space-separated (e.g., loglevel=3 splash=silent): ",
     }
     error_map: dict[str, str] = {
         "append": "No kernel argument provided",
