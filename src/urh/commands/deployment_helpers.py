@@ -11,6 +11,7 @@ Provides common patterns for:
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol, Sequence
 
 from ..deployment import DeploymentInfo, build_persistent_header
+from ..menu import MenuExitException
 from ..system import _run_command, build_command
 
 if TYPE_CHECKING:
@@ -239,7 +240,10 @@ def handle_deployment_command(
         if menu_system is None:
             return 0
 
-        deployment_num = select_func()
+        try:
+            deployment_num = select_func()
+        except MenuExitException:
+            return 0
         if deployment_num is None:
             return 0
 

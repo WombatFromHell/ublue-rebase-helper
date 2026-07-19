@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Dict, List, Optional
 
-from .constants import OSTREE_IMAGE_PREFIX
-
 # Import here to avoid circular import
 from .validators import is_valid_deployment_info
 
@@ -86,9 +84,13 @@ def parse_deployment_info(status_output: str) -> List[DeploymentInfo]:
     return deployments
 
 
+_OSTREE_DEPLOYMENT_RE = re.compile(r"^\s*[●* ]\s*ostree-\S+:")
+_OSTREE_DEPLOYMENT_LOOKAHEAD_RE = re.compile(r"^\s*[●* ]\s+ostree-\S+:")
+
+
 def _is_deployment_line(line: str) -> bool:
     """Check if the line is a deployment line."""
-    return bool(re.match(r"^\s*[●* ]\s*ostree-image-signed:", line))
+    return bool(_OSTREE_DEPLOYMENT_RE.match(line))
 
 
 def _parse_single_deployment(line: str, lines: List[str], start_index: int) -> Dict:
@@ -101,9 +103,8 @@ def _parse_single_deployment(line: str, lines: List[str], start_index: int) -> D
     version = "Unknown"
     is_pinned = False
 
-    # Extract repository and tag from the ostree-image-signed line
-    if OSTREE_IMAGE_PREFIX in line:
-        repository = _extract_repository_from_line(line)
+    # Extract repository from the deployment line
+    repository = _extract_repository_from_line(line)
 
     # Look ahead for more information
     j = start_index + 1
@@ -134,25 +135,27 @@ def _parse_single_deployment(line: str, lines: List[str], start_index: int) -> D
 
 
 def _extract_repository_from_line(line: str) -> str:
-    """Extract repository from the ostree-image-signed line."""
-    # Extract the full image URL
+    """Extract repository from an ostree deployment line."""
+    # Docker registry images: ostree-image-signed:docker://ghcr.io/owner/repo:tag
     url_match = re.search(r"docker://([^\s)]+)", line)
     if url_match:
         full_url = url_match.group(1)
-        # Extract the full image reference: {owner}/{repo}:{tag}
-        # e.g., "ghcr.io/wombatfromhell/bazzite-nix:testing" -> "wombatfromhell/bazzite-nix:testing"
         if "/" in full_url:
-            # Take everything after the registry: "wombatfromhell/bazzite-nix:testing"
             return full_url.split("/", 1)[1]
-        else:
-            return full_url
+        return full_url
+
+    # Local container storage: ostree-unverified-image:containers-storage:localhost/name:tag
+    storage_match = re.search(r"containers-storage:localhost/([^\s)]+)", line)
+    if storage_match:
+        return storage_match.group(1)
+
     return "Unknown"
 
 
 def _should_stop_parsing(next_line: str) -> bool:
     """Check if we should stop parsing the current deployment."""
     return (
-        bool(re.match(r"^\s*[●* ]\s+ostree-image-signed:", next_line))
+        bool(_OSTREE_DEPLOYMENT_LOOKAHEAD_RE.match(next_line))
         or next_line.startswith("State:")
         or next_line.startswith("AutomaticUpdates:")
         or next_line.startswith("Deployments:")
