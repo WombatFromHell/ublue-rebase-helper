@@ -94,7 +94,7 @@ def _execute_command(
         if command_name == "rebase":
             return command.handler(
                 command_args,
-                skip_confirmation=skip_confirmation,  # type: ignore[unknown-argument]
+                skip_confirmation=skip_confirmation,
             )
         else:
             return command.handler(command_args)

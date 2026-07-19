@@ -9,13 +9,16 @@ Supports:
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from ..commands.deployment_helpers import MenuSystemProtocol
 from ..constants import REGISTRY_PREFIXES
 from ..deployment import build_persistent_header
 from ..oci_client import OCIClient
 from ..system import _run_command, build_command
+
+if TYPE_CHECKING:
+    from ..config import URHConfig
 
 
 class TagResolutionError(Exception):
@@ -102,7 +105,7 @@ def _parse_numeric_parts(parts: list[str]) -> Tuple[int, int, int]:
             return (int(parts[0]), int(parts[1]), 0)
         if len(parts) == 1 and parts[0].isdigit():
             return (0, int(parts[0]), 0)
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         pass
     return (0, 0, 0)
 
@@ -264,11 +267,13 @@ def resolve_tag_to_full_url(
     return _resolve_and_build_url(repository, tag_part, skip_confirmation)
 
 
-def _show_rebase_menu(menu_system: MenuSystemProtocol, config: object) -> Optional[str]:
+def _show_rebase_menu(
+    menu_system: MenuSystemProtocol, config: "URHConfig"
+) -> Optional[str]:
     """Show rebase submenu and return selected URL."""
     from ..models import ListItem
 
-    options = list(config.container_urls.options)  # type: ignore[attr-defined]
+    options = list(config.container_urls.options)
     items = [ListItem("", url, url) for url in options]
     persistent_header = build_persistent_header()
 

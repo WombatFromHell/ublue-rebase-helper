@@ -52,7 +52,7 @@ class CommandDefinition:
 
     name: str
     description: str
-    handler: Callable[[List[str]], int]
+    handler: Callable[..., int]
     requires_sudo: bool = False
     conditional_sudo_func: Optional[SudoConditionFunc] = (
         None  # Function to determine sudo conditionally when needed

@@ -113,7 +113,7 @@ class TestOCIClientPagination:
     ) -> None:
         """Test extracting next URL from Link header."""
         # Setup mock to return next URL
-        oci_client_with_mocks.token_manager.parse_link_header.return_value = (  # type: ignore[assignment]
+        oci_client_with_mocks.token_manager.parse_link_header.return_value = (  # type: ignore
             "https://ghcr.io/v2/test/repo/tags/list?last=tag2&n=200"
         )
 
@@ -121,7 +121,7 @@ class TestOCIClientPagination:
         next_url = oci_client_with_mocks._extract_next_url(headers)
 
         assert next_url == "https://ghcr.io/v2/test/repo/tags/list?last=tag2&n=200"
-        oci_client_with_mocks.token_manager.parse_link_header.assert_called_once_with(  # type: ignore[attr-defined]
+        oci_client_with_mocks.token_manager.parse_link_header.assert_called_once_with(  # type: ignore
             '<next-page>; rel="next"'
         )
 
@@ -176,7 +176,7 @@ class TestOCIClientPagination:
         )
 
         # Mock parse_link_header to return next URL
-        oci_client_with_mocks.token_manager.parse_link_header.return_value = (  # type: ignore[assignment]
+        oci_client_with_mocks.token_manager.parse_link_header.return_value = (  # type: ignore
             "https://ghcr.io/v2/test/repo/tags/list?last=tag2&n=200"
         )
 
@@ -252,7 +252,7 @@ class TestOCIClientPagination:
         ]
 
         # Mock parse_link_header to return next URL first time, None second
-        oci_client_with_mocks.token_manager.parse_link_header.side_effect = [  # type: ignore[assignment]
+        oci_client_with_mocks.token_manager.parse_link_header.side_effect = [  # type: ignore
             "https://ghcr.io/v2/test/repo/tags/list?last=tag2&n=200",
             None,
         ]
@@ -303,16 +303,16 @@ class TestOCIClientAuthHandling:
         ]
 
         # Mock new token after invalidation
-        oci_client_auth_mocks.token_manager.get_token.return_value = "new_token"  # type: ignore[assignment]
+        oci_client_auth_mocks.token_manager.get_token.return_value = "new_token"  # type: ignore
 
         data, next_url = oci_client_auth_mocks._fetch_page_with_headers(
             "https://ghcr.io/v2/test/repo/tags/list", "test_token"
         )
 
         # Verify token was invalidated
-        oci_client_auth_mocks.token_manager.invalidate_cache.assert_called_once()  # type: ignore[attr-defined]
+        oci_client_auth_mocks.token_manager.invalidate_cache.assert_called_once()  # type: ignore
         # Verify new token was requested
-        assert oci_client_auth_mocks.token_manager.get_token.call_count >= 1  # type: ignore[attr-defined]
+        assert oci_client_auth_mocks.token_manager.get_token.call_count >= 1  # type: ignore
         # Verify data was fetched on retry
         assert data is not None
         assert data["tags"] == ["v1.0"]
@@ -336,13 +336,13 @@ class TestOCIClientAuthHandling:
             ),
         ]
 
-        oci_client_auth_mocks.token_manager.get_token.return_value = "new_token"  # type: ignore[assignment]
+        oci_client_auth_mocks.token_manager.get_token.return_value = "new_token"  # type: ignore
 
         data, next_url = oci_client_auth_mocks._fetch_page_with_headers(
             "https://ghcr.io/v2/test/repo/tags/list", "test_token"
         )
 
-        assert oci_client_auth_mocks.token_manager.invalidate_cache.called  # type: ignore[attr-defined]
+        assert oci_client_auth_mocks.token_manager.invalidate_cache.called  # type: ignore
         assert data is not None
 
     def test_auth_error_retry_fails_returns_none(
@@ -357,7 +357,7 @@ class TestOCIClientAuthHandling:
         )
 
         # Mock token manager to return None (no new token)
-        oci_client_auth_mocks.token_manager.get_token.return_value = None  # type: ignore[assignment]
+        oci_client_auth_mocks.token_manager.get_token.return_value = None  # type: ignore
 
         data, next_url = oci_client_auth_mocks._fetch_page_with_headers(
             "https://ghcr.io/v2/test/repo/tags/list", "test_token"

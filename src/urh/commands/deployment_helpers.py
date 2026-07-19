@@ -147,8 +147,8 @@ def select_deployment(
     else:
         filtered = deployments
 
-    # Create menu items
-    items = create_deployment_menu_items(deployments)
+    # Create menu items from filtered deployments
+    items = create_deployment_menu_items(filtered)
 
     persistent_header = build_persistent_header()
 

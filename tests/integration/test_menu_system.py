@@ -234,7 +234,7 @@ class TestMenuSystemGumMenu:
         gum_menu_system.show_menu(items, "Test Header")
 
         # Verify subprocess was called
-        assert gum_menu_system._subprocess_runner.call_count > 0  # type: ignore[attr-defined]
+        assert gum_menu_system._subprocess_runner.call_count > 0  # type: ignore
 
     def test_gum_menu_returns_selected_key(
         self, mocker: MockerFixture, gum_menu_system: MenuSystem

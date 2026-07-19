@@ -35,6 +35,7 @@ def _select_deployment_to_undeploy_with_confirmation(
     menu_system: Optional[MenuSystemProtocol], deployments: List[DeploymentInfo]
 ) -> Optional[int]:
     """Show menu to select deployment for undeploying with confirmation."""
+    assert menu_system is not None
     try:
         while True:  # Loop to return to selection if user cancels
             selected = select_deployment(
@@ -60,7 +61,7 @@ def _select_deployment_to_undeploy_with_confirmation(
                     selected_deployment
                 )
 
-                confirmation = menu_system.show_menu(  # type: ignore[union-attr]
+                confirmation = menu_system.show_menu(
                     confirmation_items,
                     confirmation_header,
                     persistent_header="",
