@@ -1,91 +1,41 @@
 {
-  description = "Bitwise-deterministic reproducible builds for ublue-rebase-helper";
+  description = "ublue-rebase-helper - Reproducible Python zipapp build environment";
 
   inputs = {
     nixpkgs.url = "https://flakehub.com/f/DeterminateSystems/nixpkgs-26.05-chilled/0.1";
-    pyproject-nix = {
-      url = "github:pyproject-nix/pyproject.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    uv2nix = {
-      url = "github:pyproject-nix/uv2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    pyproject-build-systems = {
-      url = "github:pyproject-nix/build-system-pkgs";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs = {
     self,
     nixpkgs,
-    pyproject-nix,
-    uv2nix,
-    pyproject-build-systems,
   }: let
-    # Read version from pyproject.toml as source of truth
-    version = let
-      content = builtins.readFile ./pyproject.toml;
-      lines = builtins.split "\n" content;
-      filtered = builtins.filter (line: builtins.isString line && (builtins.substring 0 9 line) == "version =") lines;
-      match = builtins.match ".*version = \"([^\"]+)\".*" (builtins.head filtered);
-    in
-      if match != null
-      then builtins.head match
-      else throw "Version not found in pyproject.toml";
+    forAllSystems = nixpkgs.lib.genAttrs ["x86_64-linux"];
 
-    # Use epoch 1 for maximum determinism (Jan 1, 1970)
-    epoch = 1;
+    # Source of truth for version. Nix ships a TOML parser as a builtin,
+    # so there's no need to hand-roll a regex against pyproject.toml.
+    # Assumes a PEP 621 `[project]` table (uv-managed projects have this).
+    version = (builtins.fromTOML (builtins.readFile ./pyproject.toml)).project.version;
 
-    forAllSystems = nixpkgs.lib.genAttrs ["x86_64-linux" "aarch64-linux"];
+    # zip stores timestamps as DOS dates, which can't represent anything
+    # before 1980-01-01 — zip silently clamps earlier dates to that floor.
+    # Epoch 1 (1970) was clamped too, so it wasn't buying any determinism
+    # it didn't already have; pin it to the real floor instead.
+    epoch = 315532800;
 
-    # Read Python version from .python-version
-    pyVerRaw = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./.python-version);
-    pyVerAttr = "python" + builtins.replaceStrings ["."] [""] pyVerRaw;
+    # Read Python version from .python-version. nixpkgs only publishes
+    # major.minor attrs (python314, not python3140), so truncate any patch
+    # component, and trim more than just trailing "\n" while we're at it.
+    pyVerParts = nixpkgs.lib.take 2 (
+      nixpkgs.lib.splitString "." (nixpkgs.lib.trim (builtins.readFile ./.python-version))
+    );
+    pyVerAttr = "python" + builtins.concatStringsSep "" pyVerParts;
 
     mkPkgs = system: import nixpkgs {inherit system;};
-    python = pkgs: pkgs.${pyVerAttr};
+    py = pkgs: pkgs.${pyVerAttr};
 
-    # Load workspace from uv.lock and create overlay for reproducible Python packages
-    workspace = uv2nix.lib.workspace.loadWorkspace {
-      workspaceRoot = ./.;
-    };
-    projectOverlay = workspace.mkPyprojectOverlay {
-      sourcePreference = "wheel";
-    };
-
-    mkPythonSet = system: let
-      pkgs' = mkPkgs system;
-    in
-      (pkgs'.callPackage pyproject-nix.build.packages {
-        python = python pkgs';
-      }).overrideScope (nixpkgs.lib.composeManyExtensions [
-        pyproject-build-systems.overlays.wheel
-        projectOverlay
-      ]);
-
-    mkZipapp = system: let
-      pkgs = mkPkgs system;
-      py = python pkgs;
-      pythonSet = mkPythonSet system;
-      venv = pythonSet.mkVirtualEnv "urh-env" [];
-
-      # Step A: Prepare source with version injection
-      src = pkgs.stdenvNoCC.mkDerivation {
-        name = "ublue-rebase-helper-src";
-        buildInputs = [pkgs.gnused];
-        phases = ["installPhase"];
-        installPhase = ''
-          mkdir -p $out
-          cp -r ${./src} staging
-          chmod -R u+w staging
-          sed -i 's/^__version__ = .*/__version__ = "${version}"/' \
-            "staging/urh/constants.py"
-          cp -r staging/* $out/
-        '';
-      };
-    in
+    # zipapp bundles source only, no third-party deps. If runtime deps are
+    # ever needed, vendor site-packages into `staging` before zipping.
+    mkZipapp = pkgs:
       pkgs.stdenvNoCC.mkDerivation {
         name = "urh.pyz";
 
@@ -94,53 +44,75 @@
           findutils
           gnused
           zip
-          python3
-          uv
         ];
-
-        PYTHON = "${py}/bin/python3";
-
-        buildPhase = ''
-          mkdir -m 755 staging
-          cp -r ${src}/* staging/
-
-          # Ensure staging directory and all contents are writable before creating files
-          chmod -R u+w staging
-
-          # Create __main__.py entry point
-          echo "from entry import main; main()" > staging/__main__.py
-
-          # Normalize permissions and timestamps for determinism
-          chmod -R u+w staging
-          find staging -exec touch -d "@${builtins.toString epoch}" {} +
-
-          # Build deterministic zip: sorted file list, no extra attributes (-X)
-          (cd staging && find . \( -type d -o -type f \) | LC_ALL=C sort | zip -X -q -@ archive.zip)
-
-          # Prepend shebang to create executable pyz
-          echo '#!/usr/bin/env python3' > $out
-          cat staging/archive.zip >> $out
-          chmod +x $out
-        '';
 
         dontUnpack = true;
         dontInstall = true;
+        dontPatchShebangs = true;
+
+        buildPhase = ''
+          mkdir -p staging
+          cp -r ${./src}/. staging
+          chmod -R u+w staging
+
+          sed -i 's/^__version__ = .*/__version__ = "${version}"/' \
+            "staging/urh/constants.py"
+          echo "from entry import main; main()" > staging/__main__.py
+
+          find staging -type f -exec chmod 644 {} +
+          find staging -type d -exec chmod 755 {} +
+          find staging -exec touch -d "@${toString epoch}" {} +
+
+          (cd staging && find . \( -type d -o -type f \) | LC_ALL=C sort | zip -X -q -@ ../archive.zip)
+
+          echo '#!/usr/bin/env python3' > $out
+          cat archive.zip >> $out
+          chmod +x $out
+        '';
       };
+
+    # $bin wrapper so the pyz is installable on $PATH by home-manager / NixOS
+    # (the raw pyz output is a file, not a directory). The pyz keeps its
+    # Linux `#!/usr/bin/env python3` shebang so the artifact is byte-identical
+    # everywhere (reproducible); this wrapper ignores that shebang entirely
+    # and execs the store-pinned python3, which is what NixOS home-manager
+    # needs (no reliance on PATH python3 / /usr/bin/env there).
+    mkUrh = pkgs: zipapp:
+      pkgs.runCommand "urh" {
+        nativeBuildInputs = [pkgs.makeWrapper];
+        passthru = {inherit zipapp;};
+      } ''
+        mkdir -p $out/bin $out/libexec
+        cp ${zipapp} $out/libexec/urh.pyz
+        makeWrapper ${py pkgs}/bin/python3 $out/bin/urh \
+          --add-flags "$out/libexec/urh.pyz"
+      '';
   in {
-    packages = forAllSystems (system: {
-      default = mkZipapp system;
+    packages = forAllSystems (system: let
+      pkgs = mkPkgs system;
+      zipapp = mkZipapp pkgs;
+    in {
+      default = zipapp;
+      urh = mkUrh pkgs zipapp;
     });
+
+    homeModules.default = {pkgs, ...}: {
+      home.packages = [self.packages.${pkgs.system}.urh];
+    };
+    nixosModules.default = {pkgs, ...}: {
+      environment.systemPackages = [self.packages.${pkgs.system}.urh];
+    };
 
     devShells = forAllSystems (system: let
       pkgs = mkPkgs system;
-      pythonSet = mkPythonSet system;
-      venv = pythonSet.mkVirtualEnv "ublue-rebase-helper-dev" [];
-    in
-      pkgs.mkShell {
+    in {
+      # Standard `devShells.<system>.default` shape so `nix develop` resolves it
+      # (and not the default package).
+      default = pkgs.mkShell {
         name = "ublue-rebase-helper";
 
-        packages = with pkgs;
-          [
+        packages =
+          (with pkgs; [
             bashInteractive
             coreutils
             findutils
@@ -153,24 +125,17 @@
             uv
             which
             zip
-          ]
-          ++ [
-            # Drop-in replacement for `uv run` — deterministic venv from uv2nix
-            venv
-          ];
+          ])
+          ++ [(py pkgs)];
 
         shellHook = ''
-          export PYTHONPATH="${venv}":$PYTHONPATH
-
           echo "ublue-rebase-helper development environment loaded"
-          echo "Python: $(${python pkgs}/bin/python3 --version)"
+          echo "Python: $(${py pkgs}/bin/python3 --version)"
           echo ""
           echo "Build with: make build  (local)"
           echo "Nix build: nix build    (reproducible)"
         '';
-
-        VIRTUAL_ENV = "${venv}";
-        PATH = "${venv}/bin:$PATH";
-      });
+      };
+    });
   };
 }

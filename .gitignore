@@ -10,7 +10,6 @@ __pycache__
 dist
 
 .coverage
-Containerfile.dev
 
 # Deterministic build staging
 staging
