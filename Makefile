@@ -6,7 +6,6 @@ ENTRY_FUNC = main
 ARTIFACT = urh.pyz
 OUT = $(BUILD_DIR)/$(ARTIFACT)
 CHECKSUM = $(BUILD_DIR)/$(ARTIFACT).sha256sum
-VERSION_FILE = $(SRC_DIR)/urh/constants.py
 
 CONTAINER_IMAGE = ublue-rebase-helper-nix
 CONTAINER_FILE = Containerfile.dev

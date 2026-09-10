@@ -2,13 +2,24 @@
 Constants for ublue-rebase-helper.
 """
 
-# Version - injected at build time by Makefile
-__version__ = "1.2.8"
+from importlib.metadata import PackageNotFoundError, version
+
+__version__ = "DEV"
+
+
+def _get_version() -> str:
+    """Get version from embedded value or package metadata fallback."""
+    if __version__ != "DEV":
+        return __version__
+    try:
+        return version("ublue-rebase-helper")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def format_version_header() -> str:
     """Format the version string for display in menu headers."""
-    return f"ublue-rebase-helper v{__version__}"
+    return f"ublue-rebase-helper v{_get_version()}"
 
 
 def format_menu_separator() -> str:

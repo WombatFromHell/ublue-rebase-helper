@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from .commands.registry import CommandRegistry
 from .config import get_config
-from .constants import __version__, format_version_header
+from .constants import _get_version, format_version_header
 from .deployment import (
     format_menu_header,
     get_current_deployment_info,
@@ -27,7 +27,7 @@ def setup_logging(debug: bool = False) -> None:
 
 def _show_help() -> None:
     """Display help message with available commands and options."""
-    print(f"ublue-rebase-helper v{__version__}")
+    print(f"ublue-rebase-helper v{_get_version()}")
     print("\nUsage: urh [command] [options]")
     print("\nAvailable commands:")
     registry = CommandRegistry()
@@ -42,7 +42,7 @@ def _show_help() -> None:
 def _handle_version_flag() -> bool:
     """Check for --version/-V flag. Returns True if flag was handled."""
     if len(sys.argv) == 2 and sys.argv[1] in ("--version", "-V"):
-        print(f"ublue-rebase-helper v{__version__}")
+        print(f"ublue-rebase-helper v{_get_version()}")
         return True
     return False
 
