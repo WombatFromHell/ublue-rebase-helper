@@ -45,6 +45,9 @@ def build_command(requires_sudo: bool, base_cmd: List[str]) -> List[str]:
 
     Returns:
         Command list with sudo prepended if needed.
+
+    Repeated sudo calls reuse sudo's own per-tty credential cache (sudoers
+    timestamp_timeout: 5 min upstream, 15 min Ubuntu), so no keep-alive here.
     """
     if requires_sudo:
         elevation = get_elevation_command()

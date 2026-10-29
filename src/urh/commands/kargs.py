@@ -10,7 +10,7 @@ from ..commands.deployment_helpers import MenuSystemProtocol
 from ..deployment import build_persistent_header
 from ..menu import MenuExitException
 from ..system import _run_command, build_command
-from .shared import KargsSubcommand
+from .shared import KargsSubcommand, confirm_action
 
 
 def should_use_sudo_for_kargs(args: List[str]) -> bool:
@@ -92,6 +92,8 @@ def _handle_kargs_show(args: List[str]) -> int:
 
 def _handle_kargs_editor() -> int:
     """Handle kargs editor subcommand."""
+    if not confirm_action("Confirm kargs editor? [y/N]: "):
+        return 0
     base_cmd = build_command(True, ["rpm-ostree", "kargs"])
     return _run_command(base_cmd + ["--editor"])
 
@@ -131,6 +133,11 @@ def _execute_kargs_subcommand(
             print(f"Error: Invalid kernel argument format: {karg}")
             print(f"Usage: urh kargs {subcommand_name} <argument> [argument ...]")
             return 1
+
+    if not confirm_action(
+        f"Confirm kargs {subcommand_name} ({', '.join(kargs)})? [y/N]: "
+    ):
+        return 0
 
     base_cmd = build_command(requires_sudo, ["rpm-ostree", "kargs"])
     cmd = base_cmd + [flag_builder(karg) for karg in kargs]
@@ -286,7 +293,12 @@ def _route_menu_selection(selected: str) -> int:
 
 def _run_legacy(args: List[str]) -> int:
     """Run legacy mode: pass arguments directly to rpm-ostree kargs."""
-    from .shared import run_command_with_conditional_sudo
+    from .shared import confirm_action, run_command_with_conditional_sudo
+
+    if should_use_sudo_for_kargs(args) and not confirm_action(
+        f"Confirm kargs {' '.join(args)}? [y/N]: "
+    ):
+        return 0
 
     return run_command_with_conditional_sudo(
         ["rpm-ostree", "kargs"],

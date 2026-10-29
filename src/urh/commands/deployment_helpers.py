@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional, Protocol, Seque
 from ..deployment import DeploymentInfo, build_persistent_header
 from ..menu import MenuExitException
 from ..system import _run_command, build_command
+from .shared import confirm_action
 
 if TYPE_CHECKING:
     from ..models import ListItem, MenuItem
@@ -210,6 +211,7 @@ def handle_deployment_command(
     select_func: Callable[[], Optional[int]],
     cmd_prefix: List[str],
     cmd_suffix: List[str],
+    skip_confirmation: bool = False,
 ) -> int:
     """Handle a deployment command with optional args or menu selection.
 
@@ -226,6 +228,7 @@ def handle_deployment_command(
             Should return None if user cancels or no deployments available.
         cmd_prefix: Command prefix without sudo (e.g., ["ostree", "admin"]).
         cmd_suffix: Command suffix (e.g., ["pin"]).
+        skip_confirmation: True when the caller already confirmed the action.
 
     Returns:
         Exit code from _run_command, or 0 if cancelled/invalid.
@@ -247,6 +250,11 @@ def handle_deployment_command(
         if deployment_num is None:
             return 0
 
-    if deployment_num is not None:
-        return execute_deployment_command(deployment_num, cmd_prefix, cmd_suffix)
-    return 0
+    if deployment_num is None:
+        return 0
+
+    action = " ".join([*cmd_prefix, *cmd_suffix, str(deployment_num)])
+    if not skip_confirmation and not confirm_action(f"Confirm '{action}'? [y/N]: "):
+        return 0
+
+    return execute_deployment_command(deployment_num, cmd_prefix, cmd_suffix)

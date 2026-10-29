@@ -88,7 +88,7 @@ REPORT_BUILT = echo "Built: $(OUT)"; echo "SHA256: $$(cat $(OUT).sha256sum | cut
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +; \
-	rm -rf $(BUILD_DIR) .pytest_cache .ruff_cache .direnv .pi result* .coverage
+	rm -rf $(BUILD_DIR) .pytest_cache .ruff_cache .direnv result* .coverage
 
 configure:
 	uv venv --clear

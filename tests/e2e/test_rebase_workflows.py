@@ -551,7 +551,7 @@ class TestRebaseConfirmation:
         [
             pytest.param("y", True, None, id="confirm_lowercase_y"),
             pytest.param("Y", True, None, id="confirm_uppercase_Y"),
-            pytest.param("n", False, "Rebase cancelled.", id="declined_n"),
+            pytest.param("n", False, "Cancelled.", id="declined_n"),
         ],
     )
     def test_confirmation_prompt_responses(
@@ -626,7 +626,7 @@ class TestRebaseConfirmation:
         assert mock_popen.call_count == 0
 
         # Verify cancellation message
-        mock_print.assert_any_call("\nRebase cancelled.")
+        mock_print.assert_any_call("\nCancelled.")
 
         # Verify exit without executing rebase
         assert result == 0

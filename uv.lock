@@ -245,7 +245,7 @@ wheels = [
 
 [[package]]
 name = "ublue-rebase-helper"
-version = "1.2.10"
+version = "1.2.11"
 source = { virtual = "." }
 
 [package.dev-dependencies]

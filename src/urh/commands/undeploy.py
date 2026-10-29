@@ -107,4 +107,6 @@ def handle_undeploy(
         select_func,
         ["ostree", "admin", "undeploy"],
         [],
+        # The menu flow confirms its own selection; CLI args still get the prompt.
+        skip_confirmation=not args,
     )

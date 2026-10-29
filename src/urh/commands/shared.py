@@ -63,17 +63,32 @@ class CommandDefinition:
 T = TypeVar("T")
 
 
+def confirm_action(prompt: str) -> bool:
+    """Ask the user before a mutating action. Anything other than "y" is a decline.
+
+    Closed stdin (non-interactive run) and Ctrl-C both decline instead of raising.
+    """
+    from ..menu import get_user_input
+
+    try:
+        answer = get_user_input(prompt)
+    except EOFError, KeyboardInterrupt:
+        print("\nCancelled.")
+        return False
+
+    if answer.strip().lower() != "y":
+        print("Cancelled.")
+        return False
+    return True
+
+
 def run_command_with_conditional_sudo(
     base_cmd: List[str],
     args: List[str],
     requires_sudo: bool,
     conditional_sudo_func: Optional[SudoConditionFunc] = None,
 ) -> int:
-    """Execute a command with conditional elevation based on the requires_sudo setting.
-
-    Uses pkexec when in a graphical session with pkexec available, falling back
-    to sudo otherwise.
-    """
+    """Execute a command with conditional elevation based on the requires_sudo setting."""
     # Determine if elevation is needed
     if conditional_sudo_func is not None:
         # Use the conditional function to determine if elevation is needed

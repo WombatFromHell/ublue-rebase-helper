@@ -1,6 +1,6 @@
 # ublue-rebase-helper (urh) — Code Navigation Map
 
-> rpm-ostree wrapper with interactive gum UI. Rebase, upgrade, rollback, pin/unpin, kargs, OCI tag browsing.
+> rpm-ostree/bootc wrapper with interactive gum UI. Rebase, upgrade, rollback, pin/unpin, kargs, OCI tag browsing.
 
 ## File Index
 
@@ -13,7 +13,7 @@ src/urh/
 ├── validators.py            # leaf: is_valid_deployment_info() TypeGuard
 ├── config.py                # URHConfig, RepositoryConfig, ConfigManager, get_config()
 ├── system.py                # _run_command(execvp), build_command, is_running_as_root, URL helpers
-├── deployment.py            # parse rpm-ostree status → DeploymentInfo[], TagContext enum
+├── deployment.py            # parse rpm-ostree status --json → DeploymentInfo[], TagContext enum
 ├── menu.py                  # MenuSystem(gum→text), MenuExitException, get_user_input()
 ├── token_manager.py         # OCITokenManager: GHCR OAuth2 token + /tmp cache
 ├── tag_filter.py            # OCITagFilter: filter/sort/dedup OCI tags
@@ -127,7 +127,7 @@ sequenceDiagram
 | Command     | Handler                      | Sudo    | Flow                                                         |
 | ----------- | ---------------------------- | ------- | ------------------------------------------------------------ |
 | `check`     | `simple_ops.handle_check`    | yes     | `bootc upgrade --check`                                      |
-| `ls`        | `simple_ops.handle_ls`       | no      | `rpm-ostree status -v`                                       |
+| `ls`        | `simple_ops.handle_ls`       | no      | parsed `rpm-ostree status --json` — full image ref, digest, commit, osname |
 | `upgrade`   | `simple_ops.handle_upgrade`  | yes     | `bootc upgrade`                                              |
 | `rollback`  | `simple_ops.handle_rollback` | yes     | `rpm-ostree rollback`                                        |
 | `rebase`    | `rebase.handle_rebase`       | yes     | menu/arg → `resolve_tag_to_full_url()` → `rpm-ostree rebase` |
@@ -137,6 +137,11 @@ sequenceDiagram
 | `unpin`     | `unpin.handle_unpin`         | yes     | `handle_deployment_command(ostree admin pin -u)`             |
 | `rm`        | `rm.handle_rm`               | yes     | `handle_deployment_command(ostree admin undeploy)`           |
 | `undeploy`  | `undeploy.handle_undeploy`   | yes     | same as rm + Y/N confirmation                                |
+
+Mutating commands ask `[y/N]` via `shared.confirm_action()` before `execvp`; declining prints
+`Cancelled.` and exits 0 without running anything. Read-only commands (`ls`, `check`,
+`remote-ls`, `kargs show`) never prompt. sudo credentials are cached by sudo itself per tty
+(`timestamp_timeout`), so repeated urh commands in one terminal do not re-prompt.
 
 ## Command Registry
 
@@ -294,6 +299,7 @@ make quality → ty (typecheck) + ruff (lint/format)
 | Dependency   | Purpose                                     |
 | ------------ | ------------------------------------------- |
 | `rpm-ostree` | Core ostree operations                      |
+| `bootc`      | status / upgrade / upgrade --check          |
 | `ostree`     | Deployment pinning/undeploying              |
 | `gum`        | Interactive menus (optional, text fallback) |
 | `curl`       | OCI registry API (required)                 |

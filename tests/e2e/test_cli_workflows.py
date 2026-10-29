@@ -21,6 +21,12 @@ from tests.conftest import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _answer_confirmation(mocker: MockerFixture) -> None:
+    """Mutating commands now ask [y/N]; these end-to-end flows answer yes."""
+    mocker.patch("src.urh.menu.get_user_input", return_value="y")
+
+
 @pytest.mark.e2e
 class TestCLIDirectCommandExecution:
     """Test direct command execution via CLI arguments."""
@@ -62,26 +68,20 @@ class TestCLIDirectCommandExecution:
         last_call_args = mock_execvp.call_args_list[-1][0][1]
         assert last_call_args == expected_base_cmd
 
-    def test_ls_command_executes_correctly(
-        self, mocker: MockerFixture, cli_command
+    def test_ls_prints_deployments_without_execvp(
+        self, mocker: MockerFixture, cli_command, capsys
     ) -> None:
-        """Test that ls command executes rpm-ostree status -v."""
-        mock_popen = mocker.patch("subprocess.Popen")
-        mock_process = mocker.MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("test output", "")
-        mock_popen.return_value = mock_process
+        """urh ls renders the parsed list; it no longer replaces the process with sudo bootc."""
+        mock_execvp = mocker.patch("os.execvp")
 
         cli_command(["urh", "ls"])
-
         cli_main()
 
-        # Verify subprocess.Popen was called with the correct command
-        assert mock_popen.call_count >= 1
-        call_args = mock_popen.call_args_list[-1][0][0]
-        assert "rpm-ostree" in call_args
-        assert "status" in call_args
-        assert "-v" in call_args
+        assert mock_execvp.called is False
+        out = capsys.readouterr().out
+        assert "● 0  ghcr.io/test/repo:testing" in out
+        assert "    Version: 1.0.0" in out
+        assert "Indices match urh pin / unpin / rm / undeploy." in out
 
     def test_rebase_command_with_url_argument(
         self, mocker: MockerFixture, cli_command

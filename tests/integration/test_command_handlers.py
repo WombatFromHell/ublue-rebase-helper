@@ -11,6 +11,7 @@ These tests focus on module-level integration between CommandRegistry,
 command handlers, and their dependencies.
 """
 
+import inspect
 from typing import List
 
 import pytest
@@ -88,6 +89,7 @@ class TestSimpleCommandHandlers:
     def setup_handler_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for command handler tests."""
         mocker.patch("sys.exit")
+        mocker.patch("src.urh.menu.get_user_input", return_value="y")
 
     @pytest.mark.parametrize(
         "command,expected_cmd",
@@ -107,6 +109,7 @@ class TestSimpleCommandHandlers:
 
         handler = {
             "check": handle_check,
+            "ls": handle_ls,
             "upgrade": handle_upgrade,
             "rollback": handle_rollback,
         }[command]
@@ -114,18 +117,44 @@ class TestSimpleCommandHandlers:
 
         mock_run.assert_called_once_with(expected_cmd)
 
-    def test_ls_command_prints_status_output(self, mocker: MockerFixture) -> None:
-        """Test that ls command prints rpm-ostree status output."""
-        mock_popen = mocker.patch("subprocess.Popen")
-        mock_process = mocker.MagicMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = ("Status output here", "")
-        mock_popen.return_value = mock_process
-        mock_print = mocker.patch("builtins.print")
+    def test_handle_ls_prints_parsed_summary_without_elevation(
+        self, mocker: MockerFixture, capsys
+    ) -> None:
+        """ls renders the parsed deployment list; rpm-ostree status --json needs no root."""
+        from src.urh.deployment import DeploymentInfo
 
-        handle_ls([])
+        mocker.patch(
+            "src.urh.deployment.get_deployment_info",
+            return_value=[
+                DeploymentInfo(
+                    deployment_index=0,
+                    is_current=True,
+                    is_pinned=False,
+                    repository="test/repo:testing",
+                    version="42.20231115.0",
+                    image_ref="ghcr.io/test/repo:testing",
+                ),
+                DeploymentInfo(
+                    deployment_index=1,
+                    is_current=False,
+                    is_pinned=True,
+                    repository="test/repo:stable",
+                    version="41.20231110.0",
+                    image_ref="ghcr.io/test/repo:stable",
+                ),
+            ],
+        )
+        mock_run = mocker.patch("src.urh.commands.simple_ops._run_command")
 
-        mock_print.assert_called_with("Status output here")
+        assert handle_ls([]) == 0
+        assert mock_run.called is False
+
+        out = capsys.readouterr().out
+        assert "● 0  ghcr.io/test/repo:testing" in out
+        assert "    Version: 42.20231115.0" in out
+        assert "* 1  ghcr.io/test/repo:stable" in out
+        assert "     Pinned: yes" in out
+        assert "Indices match urh pin / unpin / rm / undeploy." in out
 
 
 @pytest.mark.integration
@@ -136,6 +165,7 @@ class TestKargsCommand:
     def setup_kargs_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for kargs tests."""
         mocker.patch("sys.exit")
+        mocker.patch("src.urh.menu.get_user_input", return_value="y")
 
     def test_kargs_no_args_shows_menu(
         self, mocker: MockerFixture, mock_rpm_ostree_commands
@@ -625,6 +655,127 @@ class TestRemoteLsCommand:
 
 
 @pytest.mark.integration
+class TestActionConfirmation:
+    """Mutating actions ask for confirmation; read-only actions never do."""
+
+    @pytest.fixture(autouse=True)
+    def setup_confirmation_environment(self, mocker: MockerFixture) -> None:
+        """Patch every command module's exec path and the y/N prompt."""
+        mocker.patch("sys.exit")
+        self.ask = mocker.patch("src.urh.menu.get_user_input", return_value="y")
+        self.simple_run = mocker.patch(
+            "src.urh.commands.simple_ops._run_command", return_value=0
+        )
+        self.deploy_run = mocker.patch(
+            "src.urh.commands.deployment_helpers._run_command", return_value=0
+        )
+        self.kargs_run = mocker.patch(
+            "src.urh.commands.kargs._run_command", return_value=0
+        )
+
+    @staticmethod
+    def _invoke(handler, args: List[str]) -> int:
+        """Call a handler with the signature it actually declares."""
+        if "menu_system" in inspect.signature(handler).parameters:
+            return handler(args, menu_system=None)
+        return handler(args)
+
+    def _ran(self) -> list[str]:
+        """The command actually execvp'd, from whichever module ran it."""
+        for mock in (self.simple_run, self.deploy_run, self.kargs_run):
+            if mock.called:
+                return mock.call_args[0][0]
+        raise AssertionError("nothing was executed")
+
+    @pytest.mark.parametrize(
+        "handler,args,expected_cmd",
+        [
+            (handle_upgrade, [], ["sudo", "bootc", "upgrade"]),
+            (handle_rollback, [], ["sudo", "rpm-ostree", "rollback"]),
+            (handle_pin, ["0"], ["sudo", "ostree", "admin", "pin", "0"]),
+            (handle_unpin, ["0"], ["sudo", "ostree", "admin", "pin", "-u", "0"]),
+            (handle_rm, ["0"], ["sudo", "ostree", "admin", "undeploy", "0"]),
+            (handle_undeploy, ["0"], ["sudo", "ostree", "admin", "undeploy", "0"]),
+            (
+                handle_kargs,
+                ["append", "quiet"],
+                ["sudo", "rpm-ostree", "kargs", "--append-if-missing=quiet"],
+            ),
+        ],
+    )
+    def test_confirmed_action_runs_once(
+        self, handler, args: List[str], expected_cmd: List[str]
+    ) -> None:
+        """Answering y runs the command once after exactly one prompt."""
+        assert self._invoke(handler, args) == 0
+        assert self.ask.call_count == 1
+        assert self._ran() == expected_cmd
+
+    @pytest.mark.parametrize(
+        "handler,args",
+        [
+            (handle_upgrade, []),
+            (handle_rollback, []),
+            (handle_pin, ["0"]),
+            (handle_unpin, ["0"]),
+            (handle_rm, ["0"]),
+            (handle_undeploy, ["0"]),
+            (handle_kargs, ["append", "quiet"]),
+        ],
+    )
+    def test_declined_action_runs_nothing(
+        self, handler, args: List[str], capsys
+    ) -> None:
+        """Any answer other than y (default [N]) execvp's nothing and exits 0."""
+        self.ask.return_value = "n"
+
+        assert self._invoke(handler, args) == 0
+        assert self.ask.call_count == 1
+        assert (
+            self.simple_run.called,
+            self.deploy_run.called,
+            self.kargs_run.called,
+        ) == (
+            False,
+            False,
+            False,
+        )
+        assert "Cancelled" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "handler,expected_cmd",
+        [
+            (handle_check, ["sudo", "bootc", "upgrade", "--check"]),
+        ],
+    )
+    def test_read_only_actions_never_ask(
+        self, handler, expected_cmd: List[str]
+    ) -> None:
+        """check changes nothing, so prompting for it is a bug."""
+        self.ask.side_effect = AssertionError("read-only command prompted the user")
+
+        self._invoke(handler, [])
+
+        assert self.simple_run.call_args[0][0] == expected_cmd
+
+    def test_ls_is_read_only_and_never_asked(self, capsys) -> None:
+        """ls renders locally, prompts nobody and execvp's nothing."""
+        self.ask.side_effect = AssertionError("read-only command prompted the user")
+
+        assert self._invoke(handle_ls, []) == 0
+        assert self.simple_run.called is False
+        assert "Deployments:" in capsys.readouterr().out
+
+    def test_cancelled_stdin_declines(self, mocker: MockerFixture) -> None:
+        """Closed stdin or Ctrl-C counts as a decline, not a crash."""
+        from src.urh.commands.shared import confirm_action
+
+        for error in (EOFError, KeyboardInterrupt):
+            mocker.patch("src.urh.menu.get_user_input", side_effect=error)
+            assert confirm_action("Confirm? [y/N]: ") is False
+
+
+@pytest.mark.integration
 class TestDeploymentCommands:
     """Test deployment-related command handlers (pin, unpin, rm, undeploy)."""
 
@@ -632,6 +783,7 @@ class TestDeploymentCommands:
     def setup_deployment_environment(self, mocker: MockerFixture) -> None:
         """Setup test environment for deployment command tests."""
         mocker.patch("sys.exit")
+        mocker.patch("src.urh.menu.get_user_input", return_value="y")
 
     def test_pin_with_deployment_number(self, mocker: MockerFixture) -> None:
         """Test pin command with deployment number argument."""

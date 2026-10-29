@@ -7,6 +7,7 @@ This module provides session, module, and function-scoped fixtures for:
 - Dependency injection helpers for testable source code
 """
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
@@ -161,25 +162,30 @@ def sample_tags_data() -> Dict[str, List[str]]:
 @pytest.fixture(scope="session")
 def sample_status_output() -> str:
     """
-    Precomputed rpm-ostree status -v output.
+    Precomputed rpm-ostree status --json output.
 
     Simulates output with multiple deployments, including pinned status.
     """
-    return """State: idle
-AutomaticUpdates: disabled
-Deployments:
-● ostree-image-signed:docker://ghcr.io/wombatfromhell/bazzite-nix:testing
-                   Digest: sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
-                  Version: 42.20231115.0 (2023-11-15T12:34:56Z)
-                   Commit: abcdef1234567890abcdef1234567890abcdef12
-                    OSName: bazzite
-  ostree-image-signed:docker://ghcr.io/wombatfromhell/bazzite-nix:stable
-                   Digest: sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
-                  Version: 41.20231110.0 (2023-11-10T12:34:56Z)
-                   Commit: 1234567890abcdef1234567890abcdef12345678
-                    OSName: bazzite
-        Pinned: yes
-"""
+    return json.dumps(
+        {
+            "deployments": [
+                {
+                    "booted": True,
+                    "container-image-reference": "docker://ghcr.io/wombatfromhell/bazzite-nix:testing",
+                    "version": "42.20231115.0",
+                    "pinned": False,
+                    "serial": 0,
+                },
+                {
+                    "booted": False,
+                    "container-image-reference": "docker://ghcr.io/wombatfromhell/bazzite-nix:stable",
+                    "version": "41.20231110.0",
+                    "pinned": True,
+                    "serial": 0,
+                },
+            ]
+        }
+    )
 
 
 @pytest.fixture(scope="session")
@@ -300,12 +306,17 @@ def mock_rpm_ostree_commands(mocker: MockerFixture) -> None:
             else:
                 mock_result.stdout = ""
         elif "rpm-ostree" in cmd and "status" in cmd:
-            mock_result.stdout = """State: idle
-Deployments:
-● ostree-image-signed:docker://ghcr.io/test/repo:testing
-               Version: 1.0.0
-                Commit: abc123
-"""
+            mock_result.stdout = json.dumps(
+                {
+                    "deployments": [
+                        {
+                            "booted": True,
+                            "container-image-reference": "docker://ghcr.io/test/repo:testing",
+                            "version": "1.0.0",
+                        }
+                    ]
+                }
+            )
         elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
             mock_result.stdout = "quiet loglevel=3"
         elif "ostree" in cmd and "admin" in cmd and "pin" in cmd:
@@ -379,12 +390,17 @@ def apply_e2e_test_environment(
                 "/usr/bin/curl" if cmd[0] in ("which", "type", "command") else ""
             )
         elif "rpm-ostree" in cmd and "status" in cmd:
-            result.stdout = """State: idle
-Deployments:
-● ostree-image-signed:docker://ghcr.io/test/repo:testing
-               Version: 1.0.0
-                Commit: abc123
-"""
+            result.stdout = json.dumps(
+                {
+                    "deployments": [
+                        {
+                            "booted": True,
+                            "container-image-reference": "docker://ghcr.io/test/repo:testing",
+                            "version": "1.0.0",
+                        }
+                    ]
+                }
+            )
         elif "rpm-ostree" in cmd and "kargs" in cmd and "sudo" not in cmd:
             result.stdout = "quiet loglevel=3"
         elif "ostree" in cmd and "admin" in cmd and "pin" in cmd:

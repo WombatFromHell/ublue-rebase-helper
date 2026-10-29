@@ -25,6 +25,12 @@ from tests.conftest import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _answer_confirmation(mocker: MockerFixture) -> None:
+    """Mutating commands now ask [y/N]; these end-to-end flows answer yes."""
+    mocker.patch("src.urh.menu.get_user_input", return_value="y")
+
+
 @pytest.mark.e2e
 class TestMainMenuNavigation:
     """Test main menu display and command selection."""

@@ -122,17 +122,9 @@ def _find_matching_tags(tag_part: str, all_tags: list[str]) -> list[str]:
 
 def _confirm_rebase(target: str) -> bool:
     """Confirm rebase with user. Returns True if confirmed, False otherwise."""
-    from ..menu import get_user_input
+    from .shared import confirm_action
 
-    try:
-        response = get_user_input(f'Confirm rebase to "{target}"? [y/N]: ')
-        if response.lower() != "y":
-            print("Rebase cancelled.")
-            return False
-        return True
-    except KeyboardInterrupt:
-        print("\nRebase cancelled.")
-        return False
+    return confirm_action(f'Confirm rebase to "{target}"? [y/N]: ')
 
 
 def _maybe_confirm(
