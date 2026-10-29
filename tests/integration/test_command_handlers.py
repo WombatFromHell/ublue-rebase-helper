@@ -758,7 +758,9 @@ class TestActionConfirmation:
 
         assert self.simple_run.call_args[0][0] == expected_cmd
 
-    def test_ls_is_read_only_and_never_asked(self, capsys) -> None:
+    def test_ls_is_read_only_and_never_asked(
+        self, capsys, mock_rpm_ostree_commands
+    ) -> None:
         """ls renders locally, prompts nobody and execvp's nothing."""
         self.ask.side_effect = AssertionError("read-only command prompted the user")
 
